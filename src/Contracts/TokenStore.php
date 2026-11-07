@@ -14,8 +14,13 @@ interface TokenStore
      * Save a token.
      *
      * With $expectedVersion the write must be compare-and-swap: it only succeeds
-     * when the stored version still equals $expectedVersion, and returns false
-     * otherwise. Without it the token is written unconditionally (first connect).
+     * when the stored version still equals $expectedVersion, and then stores the
+     * token's own version.
+     *
+     * Without it (first connect, reconnect) the write is unconditional and the
+     * store must move the version past whatever was stored before, ignoring the
+     * token's version. Otherwise a process holding an older read could still win
+     * a compare-and-swap against the new token.
      */
     public function put(string $key, StoredToken $token, ?int $expectedVersion = null): bool;
 

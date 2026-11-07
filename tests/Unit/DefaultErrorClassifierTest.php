@@ -23,7 +23,7 @@ use Throwable;
 class DefaultErrorClassifierTest extends TestCase
 {
     /**
-     * @return iterable<string, array{0: Throwable, 1: RefreshFailure}>
+     * @return iterable<string, array{0: Throwable, 1: RefreshFailure, 2: string}>
      */
     public static function errors(): iterable
     {
@@ -32,62 +32,83 @@ class DefaultErrorClassifierTest extends TestCase
 
         yield 'league invalid_grant' => [
             new IdentityProviderException('invalid_grant', 400, ['error' => 'invalid_grant']),
-            RefreshFailure::Revoked,
+            RefreshFailure::Revoked, 'invalid_grant',
         ];
         yield 'league invalid_grant as JSON string body' => [
             new IdentityProviderException('Bad Request', 400, '{"error":"invalid_grant","error_description":"token used"}'),
-            RefreshFailure::Revoked,
+            RefreshFailure::Revoked, 'invalid_grant',
         ];
         yield 'league invalid_client is a config error, not a revoke' => [
             new IdentityProviderException('invalid_client', 401, ['error' => 'invalid_client']),
-            RefreshFailure::Unexpected,
+            RefreshFailure::Unexpected, 'invalid_client',
         ];
         yield 'league 503' => [
             new IdentityProviderException('Service Unavailable', 503, '<html>maintenance</html>'),
-            RefreshFailure::Transient,
+            RefreshFailure::Transient, 'http_503',
         ];
         yield 'league 429' => [
             new IdentityProviderException('Too Many Requests', 429, []),
-            RefreshFailure::Transient,
+            RefreshFailure::Transient, 'http_429',
         ];
         yield 'guzzle connect timeout' => [
             new ConnectException('cURL error 28: Operation timed out', $request),
-            RefreshFailure::Transient,
+            RefreshFailure::Transient, 'network_error',
         ];
         yield 'guzzle 400 invalid_grant' => [
             new ClientException('Bad Request', $request, $json(400, ['error' => 'invalid_grant'])),
-            RefreshFailure::Revoked,
+            RefreshFailure::Revoked, 'invalid_grant',
         ];
         yield 'guzzle 500' => [
             new ServerException('Server Error', $request, new Response(500)),
-            RefreshFailure::Transient,
+            RefreshFailure::Transient, 'http_500',
         ];
         yield 'laravel connection error' => [
             new ConnectionException('cURL error 6: Could not resolve host'),
-            RefreshFailure::Transient,
+            RefreshFailure::Transient, 'network_error',
         ];
         yield 'laravel 400 invalid_grant' => [
             new RequestException(new LaravelResponse($json(400, ['error' => 'invalid_grant']))),
-            RefreshFailure::Revoked,
+            RefreshFailure::Revoked, 'invalid_grant',
         ];
         yield 'laravel 502' => [
             new RequestException(new LaravelResponse(new Response(502))),
-            RefreshFailure::Transient,
+            RefreshFailure::Transient, 'http_502',
         ];
         yield 'laravel 401 unauthorized_client' => [
             new RequestException(new LaravelResponse($json(401, ['error' => 'unauthorized_client']))),
-            RefreshFailure::Unexpected,
+            RefreshFailure::Unexpected, 'unauthorized_client',
         ];
         yield 'unknown exception' => [
             new RuntimeException('something else'),
-            RefreshFailure::Unexpected,
+            RefreshFailure::Unexpected, 'unexpected',
         ];
     }
 
     #[DataProvider('errors')]
-    public function test_classifies(Throwable $error, RefreshFailure $expected): void
+    public function test_classifies(Throwable $error, RefreshFailure $expected, string $code): void
     {
-        $this->assertSame($expected, (new DefaultErrorClassifier)->classify($error));
+        $classification = (new DefaultErrorClassifier)->classify($error);
+
+        $this->assertSame($expected, $classification->failure);
+        $this->assertSame($code, $classification->code);
+    }
+
+    public function test_server_errors_win_over_an_oauth_error_in_the_body(): void
+    {
+        $response = new Response(503, [], '{"error":"invalid_grant"}');
+        $error = new ServerException('Service Unavailable', new Request('POST', 'https://identity.example.test/token'), $response);
+
+        $this->assertSame(RefreshFailure::Transient, (new DefaultErrorClassifier)->classify($error)->failure);
+    }
+
+    public function test_only_short_codes_are_used_so_bodies_cannot_leak(): void
+    {
+        $error = new IdentityProviderException('Bad Request', 400, ['error' => 'refresh_token=SECRET-VALUE is not valid']);
+
+        $classification = (new DefaultErrorClassifier)->classify($error);
+
+        $this->assertSame(RefreshFailure::Unexpected, $classification->failure);
+        $this->assertSame('http_400', $classification->code);
     }
 
     public function test_revoked_error_codes_are_configurable(): void
@@ -96,7 +117,7 @@ class DefaultErrorClassifierTest extends TestCase
 
         $this->assertSame(
             RefreshFailure::Revoked,
-            $classifier->classify(new IdentityProviderException('invalid_token', 400, ['error' => 'invalid_token'])),
+            $classifier->classify(new IdentityProviderException('invalid_token', 400, ['error' => 'invalid_token']))->failure,
         );
     }
 }

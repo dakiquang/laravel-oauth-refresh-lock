@@ -147,12 +147,13 @@ class ConcurrentRefreshTest extends TestCase
     }
 
     /**
-     * @return array{refreshes: list<string>, results: list<string>, version: int|null}
+     * @return array{refreshes: list<string>, results: list<string>, versionsAdded: int}
      */
     private function runRound(string $lockStore, int $round): array
     {
         $store = new EloquentTokenStore;
         $store->put(self::KEY, new StoredToken('access-old', 'refresh-old', CarbonImmutable::now()->addSeconds(10)));
+        $seededVersion = $store->get(self::KEY)?->version ?? 0;
 
         $barrier = "{$this->dir}/start-{$round}";
         $refreshLog = "{$this->dir}/refreshes-{$round}";
@@ -180,12 +181,12 @@ class ConcurrentRefreshTest extends TestCase
         return [
             'refreshes' => $this->lines($refreshLog),
             'results' => $this->lines($resultLog),
-            'version' => $store->get(self::KEY)?->version,
+            'versionsAdded' => ($store->get(self::KEY)?->version ?? 0) - $seededVersion,
         ];
     }
 
     /**
-     * @param  array{refreshes: list<string>, results: list<string>, version: int|null}  $outcome
+     * @param  array{refreshes: list<string>, results: list<string>, versionsAdded: int}  $outcome
      */
     private function assertRoundIsSafe(int $round, array $outcome): void
     {
@@ -198,7 +199,7 @@ class ConcurrentRefreshTest extends TestCase
         $this->assertCount(1, $refreshes, "round {$round}: the provider is called exactly once");
         $this->assertCount(1, $tokens, "round {$round}: every worker gets the same access token");
         $this->assertSame('access-from-'.trim($refreshes[0]), reset($tokens));
-        $this->assertSame(1, $outcome['version'], "round {$round}: version bumped once");
+        $this->assertSame(1, $outcome['versionsAdded'], "round {$round}: version bumped once");
     }
 
     /**

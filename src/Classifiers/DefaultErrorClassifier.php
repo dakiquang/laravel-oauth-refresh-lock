@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Dakiquang\OAuthRefreshLock\Classifiers;
 
+use Dakiquang\OAuthRefreshLock\Classification;
 use Dakiquang\OAuthRefreshLock\Contracts\ErrorClassifier;
-use Dakiquang\OAuthRefreshLock\RefreshFailure;
 use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
 use Illuminate\Http\Client\ConnectionException as LaravelConnectionException;
 use Illuminate\Http\Client\RequestException as LaravelRequestException;
@@ -18,8 +18,12 @@ use Throwable;
  * HTTP client and PSR-18 clients. None of those packages is required: an
  * `instanceof` check against a class that is not installed is simply false.
  *
- * Only an OAuth error code in $revokedErrors revokes the token. When in doubt
- * the token is kept, because wrongly revoking it forces the user to reconnect.
+ * Order matters:
+ * 1. Network errors and HTTP 408, 429, 5xx are transient, whatever the body
+ *    says — a gateway or a struggling provider can return odd bodies.
+ * 2. Only an OAuth `error` code listed in $revokedErrors revokes the token.
+ * 3. Everything else is unexpected and keeps the token, because wrongly
+ *    revoking forces the user to reconnect.
  */
 final class DefaultErrorClassifier implements ErrorClassifier
 {
@@ -30,30 +34,24 @@ final class DefaultErrorClassifier implements ErrorClassifier
         private readonly array $revokedErrors = ['invalid_grant'],
     ) {}
 
-    public function classify(Throwable $error): RefreshFailure
+    public function classify(Throwable $error): Classification
     {
-        if ($this->isNetworkError($error)) {
-            return RefreshFailure::Transient;
+        // Guzzle's ConnectException implements the PSR-18 interface.
+        if ($error instanceof NetworkExceptionInterface || $error instanceof LaravelConnectionException) {
+            return Classification::transient('network_error');
         }
 
         [$status, $oauthError] = $this->response($error);
 
-        if ($oauthError !== null && in_array($oauthError, $this->revokedErrors, true)) {
-            return RefreshFailure::Revoked;
-        }
-
         if ($status !== null && ($status === 408 || $status === 429 || $status >= 500)) {
-            return RefreshFailure::Transient;
+            return Classification::transient("http_{$status}");
         }
 
-        return RefreshFailure::Unexpected;
-    }
+        if ($oauthError !== null && in_array($oauthError, $this->revokedErrors, true)) {
+            return Classification::revoked($oauthError);
+        }
 
-    private function isNetworkError(Throwable $error): bool
-    {
-        // Guzzle's ConnectException implements the PSR-18 interface.
-        return $error instanceof NetworkExceptionInterface
-            || $error instanceof LaravelConnectionException;
+        return Classification::unexpected($oauthError ?? ($status !== null ? "http_{$status}" : 'unexpected'));
     }
 
     /**
@@ -85,21 +83,27 @@ final class DefaultErrorClassifier implements ErrorClassifier
     /**
      * Read the `error` member of an OAuth2 error response given as an array,
      * a JSON string, or the bare error code that some SDKs use as the message.
+     * Only a short lowercase code is accepted, so nothing else can leak through.
      */
     private function errorCode(mixed $body): ?string
     {
         if (is_string($body)) {
             $trimmed = trim($body);
-            if (preg_match('/^[a-z_]+$/', $trimmed) === 1) {
+            if ($this->isCode($trimmed)) {
                 return $trimmed;
             }
             $body = json_decode($trimmed, true);
         }
 
-        if (is_array($body) && isset($body['error']) && is_string($body['error'])) {
+        if (is_array($body) && isset($body['error']) && is_string($body['error']) && $this->isCode($body['error'])) {
             return $body['error'];
         }
 
         return null;
+    }
+
+    private function isCode(string $value): bool
+    {
+        return preg_match('/^[a-z_]{1,64}$/', $value) === 1;
     }
 }

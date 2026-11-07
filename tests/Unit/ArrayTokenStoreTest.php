@@ -45,6 +45,17 @@ class ArrayTokenStoreTest extends TestCase
         $this->assertNull($store->get('k'));
     }
 
+    public function test_unconditional_put_moves_the_version_past_the_stored_one(): void
+    {
+        $store = new ArrayTokenStore;
+        $store->put('k', new StoredToken('a1', 'r1', null, version: 4));
+
+        $store->put('k', new StoredToken('reconnected', 'r2', null, version: 0));
+
+        $this->assertSame(5, $store->get('k')?->version);
+        $this->assertFalse($store->put('k', new StoredToken('stale', 'stale', null, version: 5), expectedVersion: 4), 'an older read must not win');
+    }
+
     public function test_forget(): void
     {
         $store = new ArrayTokenStore;

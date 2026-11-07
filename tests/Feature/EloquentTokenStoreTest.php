@@ -61,7 +61,9 @@ class EloquentTokenStoreTest extends TestCase
         $this->store->put('k', new StoredToken('reconnected', 'r2', null, version: 0));
 
         $this->assertSame('reconnected', $this->store->get('k')?->accessToken);
+        $this->assertSame(6, $this->store->get('k')?->version, 'unconditional writes move the version forward');
         $this->assertSame(1, DB::table('oauth_refresh_tokens')->count());
+        $this->assertFalse($this->store->put('k', new StoredToken('stale', 's', null, version: 6), expectedVersion: 5), 'an older read must not win');
     }
 
     public function test_compare_and_swap(): void
@@ -92,6 +94,15 @@ class EloquentTokenStoreTest extends TestCase
         $this->assertTrue($loaded?->isRevoked());
         $this->assertSame('invalid_grant', $loaded?->revokedReason);
         $this->assertTrue($loaded?->revokedAt?->equalTo($now));
+    }
+
+    public function test_times_with_another_offset_keep_the_same_instant(): void
+    {
+        $expires = CarbonImmutable::parse('2026-11-07 17:30:00', 'Asia/Ho_Chi_Minh');
+
+        $this->store->put('k', new StoredToken('a', 'r', $expires));
+
+        $this->assertTrue($this->store->get('k')?->expiresAt?->equalTo($expires));
     }
 
     public function test_forget(): void

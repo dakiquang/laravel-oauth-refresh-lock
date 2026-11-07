@@ -21,6 +21,13 @@ use Throwable;
 /**
  * Hands out access tokens and refreshes them at most once per expiry, however
  * many processes ask at the same time.
+ *
+ * The lock is a lease: if a refresh outlives `lockSeconds`, another process
+ * can take the lock and send the same (now retired) refresh token. That
+ * process gets `invalid_grant` and may record a revocation. The process that
+ * actually rotated the token detects this when its compare-and-swap fails and
+ * restores the valid token. Keep the refresher's HTTP timeout well below
+ * `lockSeconds` so this stays rare.
  */
 class RefreshCoordinator
 {
@@ -41,6 +48,7 @@ class RefreshCoordinator
 
     /**
      * A token whose access token is valid for at least $skewSeconds.
+     * A token stored without an expiry is returned as is: there is nothing to compare.
      *
      * @param  Refresher|Closure(StoredToken): RefreshedToken  $refresher
      *
@@ -101,10 +109,13 @@ class RefreshCoordinator
             return $current;
         }
 
+        // Stores keep whole seconds; compare revocations against the start of this second.
+        $startedAt = CarbonImmutable::now()->startOfSecond();
+
         try {
             $refreshed = $refresher->refresh($current);
         } catch (Throwable $error) {
-            $this->fail($key, $current, $error);
+            return $this->fail($key, $current, $error);
         }
 
         $next = $current->withRefreshed($refreshed);
@@ -113,30 +124,44 @@ class RefreshCoordinator
             return $next;
         }
 
-        // Someone wrote without the lock (a reconnect, a manual fix). Theirs wins.
+        // Someone wrote while we were refreshing. If it is a revocation recorded after we
+        // started, it came from a process that reused the refresh token we just rotated
+        // (our lease expired). Our new tokens are the valid ones: put them back.
+        $stored = $this->store->get($key);
+        if ($stored !== null && $stored->revokedAt !== null && $stored->revokedAt->greaterThanOrEqualTo($startedAt)) {
+            $restored = $stored->withRefreshed($refreshed);
+            if ($this->store->put($key, $restored, expectedVersion: $stored->version)) {
+                return $restored;
+            }
+        }
+
+        // Otherwise a reconnect or manual fix wins.
         return $this->load($key);
     }
 
     /**
      * @throws TokenRevoked|TransientRefreshFailure|Throwable
      */
-    private function fail(string $key, StoredToken $current, Throwable $error): never
+    private function fail(string $key, StoredToken $current, Throwable $error): StoredToken
     {
-        $failure = $this->classifier->classify($error);
+        $classification = $this->classifier->classify($error);
 
-        if ($failure === RefreshFailure::Revoked) {
-            $reason = $this->reason($error);
-            // Keep the record, marked revoked, so the app knows who has to reconnect.
-            $this->store->put($key, $current->withRevoked($reason, CarbonImmutable::now()), expectedVersion: $current->version);
-
-            throw new TokenRevoked($key, $reason, $error);
+        if ($classification->failure === RefreshFailure::Transient) {
+            throw new TransientRefreshFailure($key, $classification->code, $error);
         }
 
-        if ($failure === RefreshFailure::Transient) {
-            throw new TransientRefreshFailure($key, $error);
+        if ($classification->failure !== RefreshFailure::Revoked) {
+            throw $error;
         }
 
-        throw $error;
+        $revoked = $current->withRevoked($classification->code, CarbonImmutable::now());
+        if ($this->store->put($key, $revoked, expectedVersion: $current->version)) {
+            throw new TokenRevoked($key, $classification->code, $error);
+        }
+
+        // The version moved while we called the provider: someone refreshed or
+        // reconnected, so our refresh token was just stale. Use what they stored.
+        return $this->load($key);
     }
 
     private function load(string $key): StoredToken
@@ -153,12 +178,5 @@ class RefreshCoordinator
     private function lockName(string $key): string
     {
         return $this->lockPrefix.$key;
-    }
-
-    private function reason(Throwable $error): string
-    {
-        $message = trim($error->getMessage());
-
-        return mb_strimwidth($message === '' ? $error::class : $message, 0, 200, '…');
     }
 }
