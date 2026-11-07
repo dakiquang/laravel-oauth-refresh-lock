@@ -18,9 +18,10 @@ interface TokenStore
      * token's own version.
      *
      * Without it (first connect, reconnect) the write is unconditional and the
-     * store must move the version past whatever was stored before, ignoring the
-     * token's version. Otherwise a process holding an older read could still win
-     * a compare-and-swap against the new token.
+     * store controls the version, ignoring the token's: an existing key moves to
+     * stored version + 1, a new key starts at Versions::initial() (time-based).
+     * Otherwise a process holding an older read — even one taken before the key
+     * was forgotten — could still win a compare-and-swap against the new token.
      */
     public function put(string $key, StoredToken $token, ?int $expectedVersion = null): bool;
 

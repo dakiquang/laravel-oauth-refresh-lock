@@ -40,7 +40,7 @@ class EloquentTokenStoreTest extends TestCase
         $this->assertTrue($loaded->expiresAt?->equalTo($expires));
         $this->assertSame(['read', 'write'], $loaded->scopes);
         $this->assertSame(['tenant' => 't1'], $loaded->meta);
-        $this->assertSame(3, $loaded->version);
+        $this->assertGreaterThan(1_000_000_000_000_000, $loaded->version, 'a new key gets a time-based version, not the caller\'s 3');
         $this->assertFalse($loaded->isRevoked());
     }
 
@@ -57,25 +57,27 @@ class EloquentTokenStoreTest extends TestCase
 
     public function test_unconditional_put_overwrites_existing_row(): void
     {
-        $this->store->put('k', new StoredToken('first', 'r', null, version: 5));
+        $this->store->put('k', new StoredToken('first', 'r', null));
+        $v = $this->store->get('k')?->version ?? 0;
         $this->store->put('k', new StoredToken('reconnected', 'r2', null, version: 0));
 
         $this->assertSame('reconnected', $this->store->get('k')?->accessToken);
-        $this->assertSame(6, $this->store->get('k')?->version, 'unconditional writes move the version forward');
+        $this->assertSame($v + 1, $this->store->get('k')?->version, 'unconditional writes move the version forward');
         $this->assertSame(1, DB::table('oauth_refresh_tokens')->count());
-        $this->assertFalse($this->store->put('k', new StoredToken('stale', 's', null, version: 6), expectedVersion: 5), 'an older read must not win');
+        $this->assertFalse($this->store->put('k', new StoredToken('stale', 's', null, version: $v + 1), expectedVersion: $v), 'an older read must not win');
     }
 
     public function test_compare_and_swap(): void
     {
-        $this->store->put('k', new StoredToken('a1', 'r1', null, version: 1));
+        $this->store->put('k', new StoredToken('a1', 'r1', null));
+        $v = $this->store->get('k')?->version ?? 0;
 
-        $this->assertFalse($this->store->put('k', new StoredToken('stale', 'stale', null, version: 2), expectedVersion: 0));
+        $this->assertFalse($this->store->put('k', new StoredToken('stale', 'stale', null, version: $v + 1), expectedVersion: $v - 1));
         $this->assertSame('a1', $this->store->get('k')?->accessToken);
 
-        $this->assertTrue($this->store->put('k', new StoredToken('a2', 'r2', null, version: 2), expectedVersion: 1));
+        $this->assertTrue($this->store->put('k', new StoredToken('a2', 'r2', null, version: $v + 1), expectedVersion: $v));
         $this->assertSame('a2', $this->store->get('k')?->accessToken);
-        $this->assertSame(2, $this->store->get('k')?->version);
+        $this->assertSame($v + 1, $this->store->get('k')?->version);
     }
 
     public function test_compare_and_swap_on_missing_row_fails(): void
@@ -94,6 +96,20 @@ class EloquentTokenStoreTest extends TestCase
         $this->assertTrue($loaded?->isRevoked());
         $this->assertSame('invalid_grant', $loaded?->revokedReason);
         $this->assertTrue($loaded?->revokedAt?->equalTo($now));
+        $this->assertSame(0, $loaded?->revokedFromVersion);
+    }
+
+    public function test_forget_then_reconnect_never_reuses_a_version(): void
+    {
+        $this->store->put('k', new StoredToken('a1', 'r1', null));
+        $staleRead = $this->store->get('k')?->version ?? 0;
+
+        $this->store->forget('k');
+        usleep(2);
+        $this->store->put('k', new StoredToken('reconnected', 'r2', null));
+
+        $this->assertFalse($this->store->put('k', new StoredToken('stale', 's', null, version: $staleRead + 1), expectedVersion: $staleRead));
+        $this->assertSame('reconnected', $this->store->get('k')?->accessToken);
     }
 
     public function test_times_with_another_offset_keep_the_same_instant(): void

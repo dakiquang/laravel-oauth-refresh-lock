@@ -24,10 +24,13 @@ use Throwable;
  *
  * The lock is a lease: if a refresh outlives `lockSeconds`, another process
  * can take the lock and send the same (now retired) refresh token. That
- * process gets `invalid_grant` and may record a revocation. The process that
- * actually rotated the token detects this when its compare-and-swap fails and
- * restores the valid token. Keep the refresher's HTTP timeout well below
- * `lockSeconds` so this stays rare.
+ * process gets `invalid_grant` and records a revocation of that generation.
+ * The process that actually rotated it detects this when its compare-and-swap
+ * fails and restores the valid token. Keep the refresher's HTTP timeout well
+ * below `lockSeconds` so this stays rare.
+ *
+ * To disconnect a user, forget() the token (inside withLock()). A revoked
+ * state is reserved for tokens the provider rejected.
  */
 class RefreshCoordinator
 {
@@ -109,9 +112,6 @@ class RefreshCoordinator
             return $current;
         }
 
-        // Stores keep whole seconds; compare revocations against the start of this second.
-        $startedAt = CarbonImmutable::now()->startOfSecond();
-
         try {
             $refreshed = $refresher->refresh($current);
         } catch (Throwable $error) {
@@ -124,11 +124,11 @@ class RefreshCoordinator
             return $next;
         }
 
-        // Someone wrote while we were refreshing. If it is a revocation recorded after we
-        // started, it came from a process that reused the refresh token we just rotated
-        // (our lease expired). Our new tokens are the valid ones: put them back.
+        // Someone wrote while we were refreshing. If it is a revocation of the exact
+        // generation we just rotated, it came from a process that reused our retired
+        // refresh token after our lease expired. Our new tokens are the valid ones.
         $stored = $this->store->get($key);
-        if ($stored !== null && $stored->revokedAt !== null && $stored->revokedAt->greaterThanOrEqualTo($startedAt)) {
+        if ($stored !== null && $stored->isRevoked() && $stored->revokedFromVersion === $current->version) {
             $restored = $stored->withRefreshed($refreshed);
             if ($this->store->put($key, $restored, expectedVersion: $stored->version)) {
                 return $restored;

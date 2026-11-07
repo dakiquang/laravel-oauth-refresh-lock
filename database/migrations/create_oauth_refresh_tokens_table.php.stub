@@ -25,9 +25,10 @@ return new class extends Migration
             $table->timestamp('expires_at')->nullable();
             $table->json('scopes')->nullable();
             $table->json('meta')->nullable();
-            $table->unsignedInteger('version')->default(0);
+            $table->unsignedBigInteger('version')->default(0);
             $table->timestamp('revoked_at')->nullable();
             $table->string('revoked_reason', 255)->nullable();
+            $table->unsignedBigInteger('revoked_from_version')->nullable();
             $table->timestamps();
         });
     }

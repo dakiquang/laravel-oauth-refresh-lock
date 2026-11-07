@@ -6,6 +6,7 @@ namespace Dakiquang\OAuthRefreshLock\Stores;
 
 use Dakiquang\OAuthRefreshLock\Contracts\TokenStore;
 use Dakiquang\OAuthRefreshLock\StoredToken;
+use Dakiquang\OAuthRefreshLock\Support\Versions;
 
 /**
  * In-memory store for tests and single-process scripts. Not shared between
@@ -35,7 +36,7 @@ final class ArrayTokenStore implements TokenStore
             return true;
         }
 
-        $this->tokens[$key] = $existing === null ? $token : $this->withVersion($token, $existing->version + 1);
+        $this->tokens[$key] = $this->withVersion($token, $existing === null ? Versions::initial() : $existing->version + 1);
 
         return true;
     }
@@ -56,6 +57,7 @@ final class ArrayTokenStore implements TokenStore
             version: $version,
             revokedAt: $token->revokedAt,
             revokedReason: $token->revokedReason,
+            revokedFromVersion: $token->revokedFromVersion,
         );
     }
 }

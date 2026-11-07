@@ -17,6 +17,7 @@ use Dakiquang\OAuthRefreshLock\StoredToken;
 use Dakiquang\OAuthRefreshLock\Stores\ArrayTokenStore;
 use Dakiquang\OAuthRefreshLock\Stores\EloquentTokenStore;
 use Dakiquang\OAuthRefreshLock\Tests\TestCase;
+use Illuminate\Support\Facades\Cache;
 
 class ServiceProviderTest extends TestCase
 {
@@ -83,8 +84,15 @@ class ServiceProviderTest extends TestCase
         $this->app->instance(TokenStore::class, $store = new ArrayTokenStore);
         $store->put('k', new StoredToken('old', 'r', CarbonImmutable::now()->subMinute()));
 
-        $access = OAuthRefreshLock::for('k')->accessToken(fn (StoredToken $t): RefreshedToken => RefreshedToken::fromExpiresIn('new', 'r2', 3600));
+        $lockWasHeld = null;
+        $access = OAuthRefreshLock::for('k')->accessToken(function (StoredToken $t) use (&$lockWasHeld): RefreshedToken {
+            // While refreshing, the lock with the custom prefix must be taken in the configured store.
+            $lockWasHeld = ! Cache::store('array')->lock('custom:k', 5)->get();
+
+            return RefreshedToken::fromExpiresIn('new', 'r2', 3600);
+        });
 
         $this->assertSame('new', $access);
+        $this->assertTrue($lockWasHeld);
     }
 }

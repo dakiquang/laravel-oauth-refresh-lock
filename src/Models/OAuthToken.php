@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $version
  * @property CarbonImmutable|null $revoked_at
  * @property string|null $revoked_reason
+ * @property int|null $revoked_from_version
  */
 class OAuthToken extends Model
 {
@@ -52,6 +53,7 @@ class OAuthToken extends Model
             'meta' => 'array',
             'version' => 'integer',
             'revoked_at' => 'immutable_datetime',
+            'revoked_from_version' => 'integer',
         ];
     }
 }

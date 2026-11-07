@@ -8,14 +8,14 @@ use Carbon\CarbonImmutable;
 use Dakiquang\OAuthRefreshLock\Contracts\TokenStore;
 use Dakiquang\OAuthRefreshLock\Models\OAuthToken;
 use Dakiquang\OAuthRefreshLock\StoredToken;
-use Illuminate\Database\UniqueConstraintViolationException;
+use Dakiquang\OAuthRefreshLock\Support\Versions;
 
 /**
  * Keeps tokens in a database table with the access and refresh tokens
  * encrypted by the application key. Every write is a single statement, so it
- * is safe across processes and servers:
+ * is safe across processes and servers and inside callers' transactions:
  * - compare-and-swap: UPDATE ... WHERE key = ? AND version = ?
- * - unconditional:    UPDATE ... SET version = version + 1, or INSERT for a new key
+ * - unconditional:    INSERT ... ON CONFLICT/DUPLICATE KEY UPDATE ..., version = version + 1
  */
 final class EloquentTokenStore implements TokenStore
 {
@@ -46,30 +46,17 @@ final class EloquentTokenStore implements TokenStore
         }
 
         unset($attributes['version']);
-        $bumped = [...$attributes, 'version' => $model->getConnection()->raw('version + 1'), 'updated_at' => $now];
+        $query = $model->newQuery()->toBase();
+        $grammar = $query->getGrammar();
+        $nextVersion = $model->getConnection()->raw($grammar->wrapTable($model->getTable()).'.'.$grammar->wrap('version').' + 1');
 
-        if ($this->bump($model, $key, $bumped)) {
-            return true;
-        }
-
-        try {
-            $model->newQuery()->insert([...$attributes, 'key' => $key, 'version' => $token->version, 'created_at' => $now, 'updated_at' => $now]);
-        } catch (UniqueConstraintViolationException) {
-            // Another process inserted the same key between our UPDATE and INSERT.
-            return $this->bump($model, $key, $bumped);
-        }
+        $query->upsert(
+            [[...$attributes, 'key' => $key, 'version' => Versions::initial(), 'created_at' => $now, 'updated_at' => $now]],
+            ['key'],
+            [...array_keys($attributes), 'updated_at', 'version' => $nextVersion],
+        );
 
         return true;
-    }
-
-    /**
-     * @param  array<string, mixed>  $values
-     *
-     * @phpstan-impure
-     */
-    private function bump(OAuthToken $model, string $key, array $values): bool
-    {
-        return $model->newQuery()->where('key', $key)->update($values) === 1;
     }
 
     public function forget(string $key): void
@@ -96,6 +83,7 @@ final class EloquentTokenStore implements TokenStore
             'version' => $token->version,
             'revoked_at' => $this->appTime($token->revokedAt),
             'revoked_reason' => $token->revokedReason,
+            'revoked_from_version' => $token->revokedFromVersion,
         ];
     }
 
@@ -119,6 +107,7 @@ final class EloquentTokenStore implements TokenStore
             version: $row->version,
             revokedAt: $row->revoked_at,
             revokedReason: $row->revoked_reason,
+            revokedFromVersion: $row->revoked_from_version,
         );
     }
 }

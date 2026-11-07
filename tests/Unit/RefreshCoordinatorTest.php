@@ -34,6 +34,9 @@ class RefreshCoordinatorTest extends TestCase
 
     private int $refreshCalls = 0;
 
+    /** Version of the token seed() stored. */
+    private int $v0 = 0;
+
     protected function setUp(): void
     {
         $this->now = CarbonImmutable::parse('2026-11-07 10:00:00');
@@ -73,7 +76,7 @@ class RefreshCoordinatorTest extends TestCase
         $stored = $this->store->get(self::KEY);
         $this->assertSame('access-1', $stored?->accessToken);
         $this->assertSame('refresh-1', $stored?->refreshToken);
-        $this->assertSame(1, $stored?->version);
+        $this->assertSame($this->v0 + 1, $stored?->version);
         $this->assertTrue($stored?->expiresAt?->equalTo($this->now->addHour()));
     }
 
@@ -82,7 +85,7 @@ class RefreshCoordinatorTest extends TestCase
         $this->seed(expiresIn: 60);
         // Simulate: by the time we hold the lock, someone else stored a fresh token.
         $this->locks->afterAcquire = function (): void {
-            $this->store->put(self::KEY, new StoredToken('access-other', 'refresh-other', $this->now->addHour(), version: 1), expectedVersion: 0);
+            $this->store->put(self::KEY, new StoredToken('access-other', 'refresh-other', $this->now->addHour(), version: $this->v0 + 1), expectedVersion: $this->v0);
         };
 
         $access = $this->coordinator()->for(self::KEY)->accessToken($this->refresher());
@@ -106,7 +109,8 @@ class RefreshCoordinatorTest extends TestCase
         $stored = $this->store->get(self::KEY);
         $this->assertTrue($stored?->isRevoked());
         $this->assertSame('refresh-0', $stored?->refreshToken);
-        $this->assertSame(1, $stored?->version);
+        $this->assertSame($this->v0 + 1, $stored?->version);
+        $this->assertSame($this->v0, $stored?->revokedFromVersion);
     }
 
     public function test_revoked_token_is_rejected_without_refreshing(): void
@@ -138,7 +142,7 @@ class RefreshCoordinatorTest extends TestCase
         $stored = $this->store->get(self::KEY);
         $this->assertFalse($stored?->isRevoked());
         $this->assertSame('refresh-0', $stored?->refreshToken);
-        $this->assertSame(0, $stored?->version);
+        $this->assertSame($this->v0, $stored?->version);
     }
 
     public function test_unexpected_failure_is_rethrown_and_keeps_the_token(): void
@@ -153,7 +157,7 @@ class RefreshCoordinatorTest extends TestCase
             $this->assertSame($error, $caught);
         }
 
-        $this->assertSame(0, $this->store->get(self::KEY)?->version);
+        $this->assertSame($this->v0, $this->store->get(self::KEY)?->version);
     }
 
     public function test_lock_held_elsewhere_times_out_without_changes(): void
@@ -169,7 +173,7 @@ class RefreshCoordinatorTest extends TestCase
         }
 
         $this->assertSame(0, $this->refreshCalls);
-        $this->assertSame(0, $this->store->get(self::KEY)?->version);
+        $this->assertSame($this->v0, $this->store->get(self::KEY)?->version);
     }
 
     public function test_lost_compare_and_swap_returns_what_is_stored(): void
@@ -244,7 +248,7 @@ class RefreshCoordinatorTest extends TestCase
         $this->seed(expiresIn: 60);
         $refresher = function (StoredToken $token): RefreshedToken {
             // While we wait on the provider, another writer stores a fresh token...
-            $this->store->put(self::KEY, new StoredToken('access-other', 'refresh-other', $this->now->addHour(), version: 1), expectedVersion: 0);
+            $this->store->put(self::KEY, new StoredToken('access-other', 'refresh-other', $this->now->addHour(), version: $this->v0 + 1), expectedVersion: $this->v0);
             // ...so the provider rejects the refresh token we sent.
             throw new RuntimeException('invalid_grant');
         };
@@ -285,7 +289,8 @@ class RefreshCoordinatorTest extends TestCase
         $stored = $this->store->get(self::KEY);
         $this->assertFalse($stored?->isRevoked(), 'the valid rotation is restored');
         $this->assertSame('refresh-rotated', $stored?->refreshToken);
-        $this->assertSame(2, $stored?->version);
+        $this->assertSame($this->v0 + 2, $stored?->version);
+        $this->assertNull($stored?->revokedFromVersion);
     }
 
     public function test_reconnect_during_refresh_is_not_overwritten(): void
@@ -304,6 +309,49 @@ class RefreshCoordinatorTest extends TestCase
         $this->assertSame('refresh-reconnected', $this->store->get(self::KEY)?->refreshToken);
     }
 
+    public function test_a_later_revocation_of_a_newer_generation_is_not_cleared(): void
+    {
+        $this->seed(expiresIn: 60);
+        $refresher = function (StoredToken $token): RefreshedToken {
+            // While we refresh: the user reconnects, and that new token is then rejected for real.
+            $this->store->put(self::KEY, new StoredToken('access-reconnected', 'refresh-reconnected', $this->now->addHour()));
+            $reconnected = $this->store->get(self::KEY);
+            $this->assertNotNull($reconnected);
+            $this->store->put(self::KEY, $reconnected->withRevoked('invalid_grant', $this->now), expectedVersion: $reconnected->version);
+
+            return RefreshedToken::fromExpiresIn('access-ours', 'refresh-ours', 3600);
+        };
+
+        try {
+            $this->coordinator()->for(self::KEY)->token($refresher);
+            $this->fail('TokenRevoked was not thrown');
+        } catch (TokenRevoked) {
+            // expected: that revocation belongs to the reconnected generation, not ours
+        }
+
+        $stored = $this->store->get(self::KEY);
+        $this->assertTrue($stored?->isRevoked());
+        $this->assertSame('refresh-reconnected', $stored?->refreshToken);
+    }
+
+    public function test_forget_during_refresh_wins(): void
+    {
+        $this->seed(expiresIn: 60);
+        $refresher = function (StoredToken $token): RefreshedToken {
+            $this->store->forget(self::KEY); // the user disconnects
+
+            return RefreshedToken::fromExpiresIn('access-ours', 'refresh-ours', 3600);
+        };
+
+        $this->expectException(TokenNotFound::class);
+
+        try {
+            $this->coordinator()->for(self::KEY)->token($refresher);
+        } finally {
+            $this->assertNull($this->store->get(self::KEY));
+        }
+    }
+
     private function coordinator(RefreshFailure $failure = RefreshFailure::Unexpected, string $code = 'test_code', int $lockSeconds = 30): RefreshCoordinator
     {
         return new RefreshCoordinator($this->store, $this->locks, new FixedClassifier($failure, $code), lockSeconds: $lockSeconds);
@@ -318,6 +366,7 @@ class RefreshCoordinatorTest extends TestCase
     private function seed(int $expiresIn): void
     {
         $this->store->put(self::KEY, new StoredToken('access-0', 'refresh-0', $this->now->addSeconds($expiresIn)));
+        $this->v0 = $this->store->get(self::KEY)?->version ?? 0;
     }
 
     /**

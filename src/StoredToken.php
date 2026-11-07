@@ -25,6 +25,7 @@ final class StoredToken
         public readonly int $version = 0,
         public readonly ?CarbonImmutable $revokedAt = null,
         public readonly ?string $revokedReason = null,
+        public readonly ?int $revokedFromVersion = null,
     ) {}
 
     public function isRevoked(): bool
@@ -58,6 +59,11 @@ final class StoredToken
         );
     }
 
+    /**
+     * The token marked revoked. `revokedFromVersion` records which generation was
+     * rejected, so a process that rotated that very generation can tell that the
+     * rejection was caused by its own rotation.
+     */
     public function withRevoked(string $reason, CarbonImmutable $now): self
     {
         return new self(
@@ -69,6 +75,7 @@ final class StoredToken
             version: $this->version + 1,
             revokedAt: $now,
             revokedReason: $reason,
+            revokedFromVersion: $this->version,
         );
     }
 }

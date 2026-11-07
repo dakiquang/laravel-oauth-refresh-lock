@@ -6,7 +6,7 @@ namespace Dakiquang\OAuthRefreshLock\Classifiers;
 
 use Dakiquang\OAuthRefreshLock\Classification;
 use Dakiquang\OAuthRefreshLock\Contracts\ErrorClassifier;
-use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
+use GuzzleHttp\Exception\BadResponseException as GuzzleBadResponseException;
 use Illuminate\Http\Client\ConnectionException as LaravelConnectionException;
 use Illuminate\Http\Client\RequestException as LaravelRequestException;
 use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
@@ -36,8 +36,7 @@ final class DefaultErrorClassifier implements ErrorClassifier
 
     public function classify(Throwable $error): Classification
     {
-        // Guzzle's ConnectException implements the PSR-18 interface.
-        if ($error instanceof NetworkExceptionInterface || $error instanceof LaravelConnectionException) {
+        if ($this->isNetworkError($error)) {
             return Classification::transient('network_error');
         }
 
@@ -52,6 +51,16 @@ final class DefaultErrorClassifier implements ErrorClassifier
         }
 
         return Classification::unexpected($oauthError ?? ($status !== null ? "http_{$status}" : 'unexpected'));
+    }
+
+    private function isNetworkError(Throwable $error): bool
+    {
+        // Guzzle's ConnectException implements the PSR-18 interface. Guzzle 8 also
+        // reports a timeout while reading the body as ResponseTransferException;
+        // compare by name because that class does not exist in Guzzle 7.
+        return $error instanceof NetworkExceptionInterface
+            || $error instanceof LaravelConnectionException
+            || is_a($error, 'GuzzleHttp\\Exception\\ResponseTransferException');
     }
 
     /**
@@ -71,7 +80,8 @@ final class DefaultErrorClassifier implements ErrorClassifier
             return [$error->response->status(), $this->errorCode($error->response->body())];
         }
 
-        if ($error instanceof GuzzleRequestException && $error->getResponse() !== null) {
+        // BadResponseException (4xx/5xx) has a response in both Guzzle 7 and 8.
+        if ($error instanceof GuzzleBadResponseException) {
             $response = $error->getResponse();
 
             return [$response->getStatusCode(), $this->errorCode((string) $response->getBody())];

@@ -101,6 +101,16 @@ class DefaultErrorClassifierTest extends TestCase
         $this->assertSame(RefreshFailure::Transient, (new DefaultErrorClassifier)->classify($error)->failure);
     }
 
+    public function test_rate_limit_wins_over_an_oauth_error_in_the_body(): void
+    {
+        $error = new IdentityProviderException('Too Many Requests', 429, ['error' => 'invalid_grant']);
+
+        $classification = (new DefaultErrorClassifier)->classify($error);
+
+        $this->assertSame(RefreshFailure::Transient, $classification->failure);
+        $this->assertSame('http_429', $classification->code);
+    }
+
     public function test_only_short_codes_are_used_so_bodies_cannot_leak(): void
     {
         $error = new IdentityProviderException('Bad Request', 400, ['error' => 'refresh_token=SECRET-VALUE is not valid']);
