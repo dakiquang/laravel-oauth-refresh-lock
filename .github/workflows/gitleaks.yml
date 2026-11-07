@@ -1,9 +1,13 @@
 name: gitleaks
 
+# push and pull_request scan only the new commits; a manual or scheduled run scans the whole history.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'  # weekly
 
 permissions:
   contents: read

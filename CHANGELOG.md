@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Examples for Xero, Salesforce, Microsoft Graph and Google next to QuickBooks Online, each with a `race` command; provider notes with error strings and code per provider; README FAQ.
 - Default classifier: Salesforce's `concurrent_request` (one of two refreshes at the same moment) is temporary.
 - `rejected($accessToken)`: refresh after the provider rejected an access token (HTTP 401), whatever its expiry, under the lock; a token another worker already replaced is returned without a refresh. Needed for providers that return no `expires_in`, such as Salesforce.
+- CI: gitleaks also scans the whole history on a manual run and weekly.
 - Best-effort support for Laravel 10 and 11 (PHP 8.1–8.4). Both are end of life; see the README.
 - CI on PostgreSQL for the database token store.
 - Waiting for the refresh lock survives a deadlock of Laravel's database lock on MySQL (seen on Laravel 10–12 under contention): the worker keeps waiting instead of throwing. Errors after the refresh has started are never retried.
