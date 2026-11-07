@@ -126,7 +126,8 @@ class RefreshCoordinator
             } catch (LockTimeoutException $timeout) {
                 throw new RefreshLockTimeout($key, $waitSeconds, $timeout);
             } catch (QueryException $error) {
-                if ($started || ! $this->causedByConcurrencyError($error) || microtime(true) >= $deadline) {
+                // No retry without time left for one: the next attempt must start before the deadline.
+                if ($started || ! $this->causedByConcurrencyError($error) || microtime(true) + 0.25 >= $deadline) {
                     throw $error;
                 }
                 usleep(250_000);
