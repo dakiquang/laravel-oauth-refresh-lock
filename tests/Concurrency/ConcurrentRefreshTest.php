@@ -10,6 +10,7 @@ use Dakiquang\OAuthRefreshLock\RefreshCoordinator;
 use Dakiquang\OAuthRefreshLock\RefreshedToken;
 use Dakiquang\OAuthRefreshLock\StoredToken;
 use Dakiquang\OAuthRefreshLock\Stores\EloquentTokenStore;
+use Dakiquang\OAuthRefreshLock\Tests\Support\NoLockProvider;
 use Dakiquang\OAuthRefreshLock\Tests\TestCase;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Database\Schema\Blueprint;
@@ -127,11 +128,28 @@ class ConcurrentRefreshTest extends TestCase
         }
 
         for ($round = 1; $round <= self::ROUNDS; $round++) {
-            $this->runRound($lockStore, $round);
+            $this->assertRoundIsSafe($round, $this->runRound($lockStore, $round));
         }
     }
 
-    private function runRound(string $lockStore, int $round): void
+    /**
+     * Control experiment: the same harness without a lock must observe the
+     * race, otherwise the test above would prove nothing.
+     */
+    public function test_the_harness_detects_the_race_when_there_is_no_lock(): void
+    {
+        $maxRefreshes = 0;
+        for ($round = 1; $round <= self::ROUNDS; $round++) {
+            $maxRefreshes = max($maxRefreshes, count($this->runRound('none', $round)['refreshes']));
+        }
+
+        $this->assertGreaterThan(1, $maxRefreshes, 'without a lock several workers should refresh the same token');
+    }
+
+    /**
+     * @return array{refreshes: list<string>, results: list<string>, version: int|null}
+     */
+    private function runRound(string $lockStore, int $round): array
     {
         $store = new EloquentTokenStore;
         $store->put(self::KEY, new StoredToken('access-old', 'refresh-old', CarbonImmutable::now()->addSeconds(10)));
@@ -159,8 +177,19 @@ class ConcurrentRefreshTest extends TestCase
 
         DB::purge('shared');
 
-        $refreshes = $this->lines($refreshLog);
-        $results = $this->lines($resultLog);
+        return [
+            'refreshes' => $this->lines($refreshLog),
+            'results' => $this->lines($resultLog),
+            'version' => $store->get(self::KEY)?->version,
+        ];
+    }
+
+    /**
+     * @param  array{refreshes: list<string>, results: list<string>, version: int|null}  $outcome
+     */
+    private function assertRoundIsSafe(int $round, array $outcome): void
+    {
+        ['refreshes' => $refreshes, 'results' => $results] = $outcome;
         $errors = array_values(array_filter($results, fn (string $line): bool => str_contains($line, 'ERR')));
         $tokens = array_unique(array_map(fn (string $line): string => explode(' ', $line, 2)[1] ?? '', $results));
 
@@ -169,7 +198,7 @@ class ConcurrentRefreshTest extends TestCase
         $this->assertCount(1, $refreshes, "round {$round}: the provider is called exactly once");
         $this->assertCount(1, $tokens, "round {$round}: every worker gets the same access token");
         $this->assertSame('access-from-'.trim($refreshes[0]), reset($tokens));
-        $this->assertSame(1, $store->get(self::KEY)?->version, "round {$round}: version bumped once");
+        $this->assertSame(1, $outcome['version'], "round {$round}: version bumped once");
     }
 
     /**
@@ -191,7 +220,7 @@ class ConcurrentRefreshTest extends TestCase
                 usleep(1000);
             }
 
-            $locks = Cache::store($lockStore)->getStore();
+            $locks = $lockStore === 'none' ? new NoLockProvider : Cache::store($lockStore)->getStore();
             if (! $locks instanceof LockProvider) {
                 throw new \RuntimeException("{$lockStore} has no locks");
             }

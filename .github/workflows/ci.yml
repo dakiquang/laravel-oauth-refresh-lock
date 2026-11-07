@@ -64,3 +64,40 @@ jobs:
 
       - name: Pint
         run: vendor/bin/pint --test
+
+  services:
+    name: Concurrency · Redis + MySQL
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only
+          MYSQL_DATABASE: testing
+        ports: ['3306:3306']
+        options: --health-cmd "mysqladmin ping -h 127.0.0.1" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pcntl, posix, redis, pdo_mysql
+          coverage: none
+
+      - run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Concurrency suite on MySQL with database and Redis locks
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          OAUTH_TEST_MYSQL_HOST: 127.0.0.1
+          OAUTH_TEST_MYSQL_USER: root
+          OAUTH_TEST_MYSQL_PASSWORD: ci-only
+          OAUTH_TEST_MYSQL_DATABASE: testing
+        # Run it a few times: a race that shows up rarely must still fail the build.
+        run: for i in 1 2 3; do vendor/bin/phpunit --testsuite Concurrency --fail-on-skipped || exit 1; done
