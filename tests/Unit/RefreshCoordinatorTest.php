@@ -201,6 +201,72 @@ class RefreshCoordinatorTest extends TestCase
         $this->coordinator()->for(self::KEY)->token($this->refresher());
     }
 
+    public function test_a_token_without_expiry_is_not_refreshed_unless_rejected(): void
+    {
+        $this->store->put(self::KEY, new StoredToken('access-0', 'refresh-0', null));
+
+        $this->assertSame('access-0', $this->coordinator()->for(self::KEY)->accessToken($this->refresher()));
+        $this->assertSame(0, $this->refreshCalls);
+        $this->assertSame(0, $this->locks->locksRequested);
+    }
+
+    public function test_a_rejected_token_is_refreshed_whatever_its_expiry(): void
+    {
+        $this->store->put(self::KEY, new StoredToken('access-0', 'refresh-0', null));
+        $v = $this->store->get(self::KEY)?->version ?? 0;
+
+        $token = $this->coordinator()->for(self::KEY)->rejected('access-0')->token($this->refresher());
+
+        $this->assertSame('access-1', $token->accessToken);
+        $this->assertSame(1, $this->refreshCalls);
+        $this->assertSame($v + 1, $this->store->get(self::KEY)?->version);
+        $this->assertSame('refresh-1', $this->store->get(self::KEY)?->refreshToken);
+    }
+
+    public function test_a_rejected_token_that_has_not_expired_yet_is_refreshed(): void
+    {
+        $this->seed(expiresIn: 3600);
+
+        $this->assertSame('access-1', $this->coordinator()->for(self::KEY)->rejected('access-0')->accessToken($this->refresher()));
+        $this->assertSame(1, $this->refreshCalls);
+    }
+
+    public function test_an_already_replaced_token_is_returned_without_a_lock_or_refresh(): void
+    {
+        $this->store->put(self::KEY, new StoredToken('access-new', 'refresh-new', null));
+
+        $this->assertSame('access-new', $this->coordinator()->for(self::KEY)->rejected('access-old')->accessToken($this->refresher()));
+        $this->assertSame(0, $this->refreshCalls);
+        $this->assertSame(0, $this->locks->locksRequested);
+    }
+
+    public function test_a_token_replaced_while_waiting_for_the_lock_is_not_refreshed_again(): void
+    {
+        $this->store->put(self::KEY, new StoredToken('access-0', 'refresh-0', null));
+        // Another process refreshes between our fast-path read and our lock.
+        $this->locks->afterAcquire = fn () => $this->store->put(self::KEY, new StoredToken('access-other', 'refresh-other', null));
+
+        $this->assertSame('access-other', $this->coordinator()->for(self::KEY)->rejected('access-0')->accessToken($this->refresher()));
+        $this->assertSame(0, $this->refreshCalls);
+        $this->assertSame(1, $this->locks->locksRequested);
+    }
+
+    public function test_rejected_survives_skew_and_wait(): void
+    {
+        $this->store->put(self::KEY, new StoredToken('access-0', 'refresh-0', null));
+
+        $this->assertSame('access-1', $this->coordinator()->for(self::KEY)->rejected('access-0')->skew(10)->wait(3)->accessToken($this->refresher()));
+        $this->assertSame(1, $this->refreshCalls);
+    }
+
+    public function test_a_revoked_token_reported_as_rejected_stays_revoked(): void
+    {
+        $this->store->put(self::KEY, (new StoredToken('access-0', 'refresh-0', null))->withRevoked('invalid_grant', $this->now));
+
+        $this->expectException(TokenRevoked::class);
+        $this->coordinator()->for(self::KEY)->rejected('access-0')->token($this->refresher());
+    }
+
     public function test_skew_controls_when_refresh_happens(): void
     {
         $this->seed(expiresIn: 300);

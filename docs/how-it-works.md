@@ -32,9 +32,9 @@ sequenceDiagram
     Note over B: B uses A's token, no second refresh
 ```
 
-1. **Fast path.** A token that does not expire within `skew_seconds` is returned without touching the lock.
+1. **Fast path.** A token that does not expire within `skew_seconds` is returned without touching the lock. With `rejected($accessToken)`, the token also needs a refresh while it is still that access token, whatever its expiry; a token another worker has already replaced is returned at once.
 2. **One lock per key.** Workers that need a refresh take `lock_prefix + key` from the configured cache store and wait up to `wait_seconds` for it.
-3. **Read again inside the lock.** The worker that waited usually finds the token the previous holder just stored and returns it.
+3. **Read again inside the lock.** The worker that waited usually finds the token the previous holder just stored and returns it. The same check runs again here, including the rejected access token.
 4. **Compare-and-swap write.** The refreshed token is stored only if the stored version is still the one that was read. If someone else wrote in the meantime, their write wins: after a reconnect the new token is returned, after a disconnect the caller gets `TokenNotFound`.
 
 Writes from the app (connect, reconnect) are unconditional, and the store decides their version: an existing key moves to version + 1, a new key starts from a time-based value. So a worker holding an old read can never win a compare-and-swap against a newer connection, even one made after the key was forgotten.
