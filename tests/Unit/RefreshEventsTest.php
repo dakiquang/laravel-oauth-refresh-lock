@@ -148,6 +148,58 @@ class RefreshEventsTest extends TestCase
         $this->assertSame([], $this->dispatched);
     }
 
+    public function test_a_revocation_restored_by_the_rotating_process_is_followed_by_token_refreshed(): void
+    {
+        $this->seed(expiresIn: 60);
+        $coordinator = new RefreshCoordinator($this->store, $this->locks, new FixedClassifier(RefreshFailure::Revoked, 'invalid_grant'), lockSeconds: 30, events: $this->events);
+
+        // A's provider call outlives the lock; B takes the expired lock, reuses the
+        // retired refresh token and records a revocation; then A restores its rotation.
+        $token = $coordinator->for(self::KEY)->token(function () use ($coordinator): RefreshedToken {
+            $later = $this->now->addSeconds(31);
+            Carbon::setTestNow($later);
+            CarbonImmutable::setTestNow($later);
+            try {
+                $coordinator->for(self::KEY)->token(fn (): RefreshedToken => throw new RuntimeException('invalid_grant'));
+            } catch (TokenRevoked) {
+            }
+
+            return RefreshedToken::fromExpiresIn('access-rotated', 'refresh-rotated', 3600);
+        });
+
+        $this->assertSame([TokenRevokedByProvider::class, TokenRefreshed::class], array_map(fn (object $event): string => $event::class, $this->dispatched));
+        $this->assertSame($token->version, $this->dispatched[1]->version);
+        $this->assertFalse($this->store->get(self::KEY)?->isRevoked());
+    }
+
+    public function test_a_listener_error_reaches_the_caller_after_the_token_was_stored(): void
+    {
+        $this->seed(expiresIn: 60);
+        $this->events->listen(TokenRefreshed::class, fn () => throw new LogicException('listener failed'));
+
+        try {
+            $this->coordinator()->for(self::KEY)->token(fn (): RefreshedToken => RefreshedToken::fromExpiresIn('access-new', 'refresh-new', 3600));
+            $this->fail('the listener error was not thrown');
+        } catch (LogicException $error) {
+            $this->assertSame('listener failed', $error->getMessage());
+        }
+
+        $this->assertSame('access-new', $this->store->get(self::KEY)?->accessToken, 'the refresh is stored before listeners run');
+    }
+
+    public function test_a_listener_error_on_failure_keeps_the_refresh_error_as_previous(): void
+    {
+        $this->seed(expiresIn: 60);
+        $this->events->listen(TokenRefreshFailed::class, fn () => throw new LogicException('listener failed'));
+
+        try {
+            $this->coordinator(RefreshFailure::Transient, 'http_503')->for(self::KEY)->token(fn (): RefreshedToken => throw new RuntimeException('down'));
+            $this->fail('the listener error was not thrown');
+        } catch (LogicException $error) {
+            $this->assertInstanceOf(TransientRefreshFailure::class, $error->getPrevious());
+        }
+    }
+
     public function test_without_a_dispatcher_nothing_breaks(): void
     {
         $this->seed(expiresIn: 60);

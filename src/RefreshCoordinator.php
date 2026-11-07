@@ -81,7 +81,9 @@ class RefreshCoordinator
         $refresher = $refresher instanceof Closure ? new CallbackRefresher($refresher) : $refresher;
 
         // Events are collected under the lock and dispatched once it is released,
-        // so slow listeners never hold the lock.
+        // so slow listeners never hold the lock. As with any synchronous Laravel
+        // listener, a listener's exception reaches the caller: after a refresh the
+        // token is already stored; after a failure the original error is its previous.
         $events = [];
         try {
             return $this->underLock($key, $waitSeconds, function () use ($key, $refresher, $skewSeconds, &$events): StoredToken {
