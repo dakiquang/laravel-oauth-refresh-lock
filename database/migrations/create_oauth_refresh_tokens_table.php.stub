@@ -1,0 +1,47 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function getConnection(): ?string
+    {
+        $connection = config('oauth-refresh-lock.connection');
+
+        return is_string($connection) ? $connection : null;
+    }
+
+    public function up(): void
+    {
+        Schema::connection($this->getConnection())->create($this->table(), function (Blueprint $table) {
+            $table->id();
+            $table->string('key', 191)->unique();
+            $table->text('access_token');            // encrypted
+            $table->text('refresh_token')->nullable(); // encrypted
+            $table->timestamp('expires_at')->nullable();
+            $table->json('scopes')->nullable();
+            $table->json('meta')->nullable();
+            $table->unsignedBigInteger('version')->default(0);
+            $table->timestamp('revoked_at')->nullable();
+            $table->string('revoked_reason', 255)->nullable();
+            $table->unsignedBigInteger('revoked_from_version')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::connection($this->getConnection())->dropIfExists($this->table());
+    }
+
+    private function table(): string
+    {
+        $table = config('oauth-refresh-lock.table');
+
+        return is_string($table) ? $table : 'oauth_refresh_tokens';
+    }
+};

@@ -5,6 +5,14 @@ declare(strict_types=1);
 return [
 
     /*
+    | Database connection and table used by EloquentTokenStore.
+    | null uses the default connection.
+    */
+    'connection' => env('OAUTH_REFRESH_LOCK_DB_CONNECTION'),
+
+    'table' => 'oauth_refresh_tokens',
+
+    /*
     | Cache store used for the refresh lock. Must support atomic locks.
     | Use a shared store (redis, memcached, dynamodb, database) when more
     | than one server runs workers. null uses the default cache store.
