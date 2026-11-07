@@ -29,6 +29,7 @@ class SalesforceController extends Controller
         $provider = $this->salesforce->provider();
         $url = $provider->getAuthorizationUrl();
         $request->session()->put('salesforce_state', $provider->getState());
+        $request->session()->put('salesforce_pkce', $provider->getPkceCode());
 
         return redirect()->away($url);
     }
@@ -38,7 +39,9 @@ class SalesforceController extends Controller
         $state = $request->session()->pull('salesforce_state');
         abort_unless(is_string($state) && hash_equals($state, (string) $request->query('state')), 403, 'Invalid OAuth state.');
 
-        $token = $this->salesforce->provider()->getAccessToken('authorization_code', ['code' => (string) $request->query('code')]);
+        $provider = $this->salesforce->provider();
+        $provider->setPkceCode((string) $request->session()->pull('salesforce_pkce'));
+        $token = $provider->getAccessToken('authorization_code', ['code' => (string) $request->query('code')]);
         abort_unless($token instanceof AccessToken, 500);
 
         // The org ID comes from Salesforce's own token response, not from the browser.

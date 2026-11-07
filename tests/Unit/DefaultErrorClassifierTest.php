@@ -38,6 +38,10 @@ class DefaultErrorClassifierTest extends TestCase
             new IdentityProviderException('invalid_grant', 0, $json(503, ['error' => 'invalid_grant'])),
             RefreshFailure::Transient, 'http_503',
         ];
+        yield 'salesforce concurrent_request (seen when two refreshes overlap)' => [
+            new IdentityProviderException('concurrent_request', 0, ['error' => 'concurrent_request']),
+            RefreshFailure::Transient, 'concurrent_request',
+        ];
         yield 'league temporarily_unavailable without status' => [
             new IdentityProviderException('temporarily_unavailable', 0, ['error' => 'temporarily_unavailable']),
             RefreshFailure::Transient, 'temporarily_unavailable',

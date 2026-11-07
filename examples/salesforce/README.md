@@ -2,7 +2,7 @@
 
 A Laravel example for the Salesforce REST API: connect an org, run a SOQL query, and refresh the token when the API answers **401 `INVALID_SESSION_ID`**, with one refresh even when many workers get the 401 at once.
 
-> **Tested against a local stand-in for Salesforce, not yet against a real org.** The stand-in mirrors the documented behaviour: no `expires_in`, a new refresh token on every refresh, reuse of a retired refresh token answered with `invalid_grant` and the current tokens revoked, and 401 `INVALID_SESSION_ID` for a stale access token. Result: connect and query work; `salesforce:race --workers=6`, three rounds, 18 API calls answered 401, 3 refreshes, 0 refresh-token reuses. If something differs with a real org, please open an issue.
+> **Verified on 7 November 2026 against a real Salesforce Developer Edition org** (Laravel 12, PHP 8.4, `database` cache locks): connect with PKCE, SOQL query, and `salesforce:race` over four rounds, each with one refresh and the connection kept. Also observed: no `expires_in` in the token or refresh responses, and a new refresh token on every refresh. See [What a real org did](#what-a-real-org-did).
 
 ## Why Salesforce needs this
 
@@ -41,10 +41,23 @@ if ($response->status() === 401 && $response->json('0.errorCode') === 'INVALID_S
 
 `rejected()` refreshes under the lock while the stored access token is still the rejected one. The first worker refreshes; the others find a different access token stored and retry with it.
 
+## What a real org did
+
+Two control experiments without the lock, on the same Developer Edition org:
+
+| Experiment | Result |
+|---|---|
+| Six processes refresh at the same moment with the **same** refresh token | 5 succeeded, each with a different new refresh token; 1 got `concurrent_request`. All five new access tokens worked, and the old refresh token still refreshed a few seconds later. |
+| Refresh once (R1 → R2), wait **90 seconds**, refresh with R1 again | `invalid_grant`, and R2 stopped working too (`invalid_grant`): the connection was revoked and needs a new authorisation. |
+
+So Salesforce tolerates a reuse for a short moment, which Salesforce's article does not mention, and after that revokes the whole connection, as the article says. How long the short moment lasts was not measured (somewhere between a few seconds and 90 seconds). The lock keeps every refresh single, so neither case happens. The default classifier treats `concurrent_request` as temporary.
+
 ## What you need
 
 - A Laravel 10–13 app (PHP 8.1+) with a cache store that supports locks.
-- A Salesforce org (a free Developer Edition works) and an **External Client App** with OAuth enabled: callback `http://localhost:8000/salesforce/callback`, scopes **Manage user data via APIs (`api`)** and **Perform requests at any time (`refresh_token`)**.
+- A Salesforce org (a free Developer Edition works) and an **External Client App** (Setup → App Manager → New External Client App) with **Enable OAuth**: callback `http://localhost:8000/salesforce/callback`, scopes **Manage user data via APIs (`api`)** and **Perform requests at any time (`refresh_token`, `offline_access`)**. Copy the Consumer Key and Secret from the app's Settings → OAuth Settings (Salesforce emails a verification code).
+- New External Client Apps come with **Refresh Token Rotation**, **PKCE** and a **30-day idle refresh token limit** switched on and locked. The example sends PKCE (`pkceMethod` S256); without it the authorisation fails.
+- Use the org's **My Domain** as the login URL (`https://<your-domain>.my.salesforce.com`). With a newly created app, `https://login.salesforce.com` answered `invalid_client_id` ("client identifier invalid") in our run, while My Domain worked at once.
 
 ## Set up
 

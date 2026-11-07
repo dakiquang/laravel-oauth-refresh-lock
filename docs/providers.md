@@ -7,7 +7,7 @@ How each provider handles refresh tokens, from its own documentation (checked 7 
 | Provider | New refresh token on refresh | Old refresh token afterwards | A duplicate refresh | Example |
 |---|---|---|---|---|
 | [QuickBooks Online](#intuit-quickbooks-online) | the value changes every 24 hours | expires when a new one is issued | `invalid_grant`; Intuit may revoke the tokens | [examples/quickbooks](../examples/quickbooks) |
-| [Salesforce](#salesforce) | every time (Refresh Token Rotation) | invalid at once | reuse revokes the current tokens too | [examples/salesforce](../examples/salesforce) |
+| [Salesforce](#salesforce) | every time (Refresh Token Rotation) | documented: invalid at once; observed: usable for a few seconds | after that, reuse revokes the current tokens too | [examples/salesforce](../examples/salesforce) |
 | [Xero](#xero) | every time | usable for 30 minutes | succeeds within the grace period | [examples/xero](../examples/xero) |
 | [Microsoft identity platform](#microsoft-identity-platform) | every time | not revoked when used | an extra call | [examples/microsoft](../examples/microsoft) |
 | [Google](#google) | no | stays valid | an extra call | [examples/google](../examples/google) |
@@ -55,13 +55,14 @@ A real QuickBooks Online sandbox company (7 November 2026): six processes with a
 
 ### Rotation behaviour
 
-- With Refresh Token Rotation on, every refresh returns a new refresh token and the previous one is invalidated at once. It is on by default, and cannot be turned off, for new External Client Apps since 22 October 2026.
+- With Refresh Token Rotation on, every refresh returns a new refresh token and, according to Salesforce, the previous one is invalidated at once. It is on by default, and cannot be turned off, for new External Client Apps since 22 October 2026; so are PKCE and a 30-day idle refresh token limit (seen in a Developer Edition org on 7 November 2026).
 - Reusing an invalidated refresh token revokes the current refresh token and its access tokens, so the client must authenticate again.
 - **No `expires_in`.** The token response has `access_token`, `refresh_token`, `instance_url`, `id`, `token_type`, `issued_at`, `signature` and `scope`; the session timeout is set in Salesforce. Store the token without an expiry and refresh when an API call answers 401, with `rejected()`.
 - Sources: [Refresh Token Rotation](https://help.salesforce.com/s/articleView?id=005316711&type=1), [External Client App defaults](https://help.salesforce.com/s/articleView?id=005390912&type=1), [Web Server Flow](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm&type=5), [REST API status codes](https://developer.salesforce.com/docs/platform/api-rest/guide/errorcodes.html).
 
 ### Error responses
 
+- Token endpoint, two refreshes at the same moment (observed, not documented): `{"error": "concurrent_request"}` for one of them. The default classifier treats it as temporary.
 - Token endpoint, refresh token no longer valid (the article's example):
 
   ```json
@@ -90,7 +91,11 @@ Full example, with the org ID taken from the token response and `instance_url` k
 
 ### What was tested
 
-Not yet against a real org. Against a local stand-in that mirrors the documented behaviour (no `expires_in`, rotation, reuse revokes, 401 `INVALID_SESSION_ID`): six processes, three rounds, all 18 API calls answered 401, one refresh per round, no refresh token reused. The package's concurrency test also runs eight forked workers that report the same rejected token, with database and Redis locks.
+A real Developer Edition org (7 November 2026): with the package, every worker got a 401 for the same access token and reported it with `rejected()`; one refresh per round over four rounds, connection kept. No `expires_in` in token or refresh responses; a new refresh token on every refresh.
+
+Control experiments without the lock: six refreshes at the same moment with the same refresh token gave five successes (five different new refresh tokens, all access tokens working) and one `concurrent_request`, and the old refresh token still worked a few seconds later. Reusing a rotated-out refresh token **90 seconds** after the rotation gave `invalid_grant` and revoked the current refresh token too. So the documented revocation on reuse is real, after a short tolerance that Salesforce does not document; its length was not measured.
+
+Also note: with a newly created app, `login.salesforce.com` answered `invalid_client_id` while the org's My Domain worked.
 
 ## Xero
 

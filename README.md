@@ -165,7 +165,7 @@ Rotation rules differ a lot between providers: for some, a duplicate refresh can
 | Provider | Rotates refresh tokens | A duplicate refresh | Example | Tested against |
 |---|---|---|---|---|
 | QuickBooks Online (Intuit) | the value changes every 24 hours | `invalid_grant`; Intuit may revoke the tokens | [examples/quickbooks](examples/quickbooks) | real sandbox company |
-| Salesforce | every refresh (Refresh Token Rotation) | reuse revokes the current tokens too | [examples/salesforce](examples/salesforce) | local stand-in (real org pending) |
+| Salesforce | every refresh (Refresh Token Rotation) | reuse revokes the connection (observed after 90 seconds) | [examples/salesforce](examples/salesforce) | real Developer Edition org |
 | Xero | every refresh | succeeds within the 30-minute grace period | [examples/xero](examples/xero) | real demo organisation |
 | Microsoft identity platform (Graph) | every refresh, old one not revoked | an extra call | [examples/microsoft](examples/microsoft) | boot check only |
 | Google | no | an extra call | [examples/google](examples/google) | boot check only |
@@ -199,7 +199,7 @@ Yes. The grace period hides duplicate refreshes, but each one still issues anoth
 
 - CI runs PHP 8.1–8.5 with Laravel 10–13, PHPStan at max level, and the store tests on SQLite, MySQL and PostgreSQL.
 - A concurrency test forks eight PHP processes that ask for the same expiring (or rejected) token at the same moment, three rounds per run, with the database lock and the Redis lock. A control run without the lock must show more than one refresh.
-- The QuickBooks Online and Xero examples were run against real sandbox accounts; see each example's README.
+- The QuickBooks Online, Xero and Salesforce examples were run against real sandbox or developer accounts; see each example's README.
 
 ## Limits
 

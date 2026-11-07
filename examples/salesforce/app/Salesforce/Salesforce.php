@@ -42,6 +42,8 @@ final class Salesforce
             'urlResourceOwnerDetails' => $login.'/services/oauth2/userinfo',
             'scopes' => ['api', 'refresh_token'],
             'scopeSeparator' => ' ',
+            // New External Client Apps require PKCE for the web server flow.
+            'pkceMethod' => GenericProvider::PKCE_METHOD_S256,
         ]);
     }
 

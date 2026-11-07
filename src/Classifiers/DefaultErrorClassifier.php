@@ -31,11 +31,12 @@ final class DefaultErrorClassifier implements ErrorClassifier
 {
     /**
      * @param  list<string>  $revokedErrors  OAuth2 `error` codes that mean the refresh token is dead (RFC 6749 §5.2).
-     * @param  list<string>  $transientErrors  OAuth2 `error` codes that mean "try again later" (RFC 6749 §4.1.2.1).
+     * @param  list<string>  $transientErrors  OAuth2 `error` codes that mean "try again later": RFC 6749 §4.1.2.1's,
+     *                                         and Salesforce's `concurrent_request` for a refresh that overlapped another.
      */
     public function __construct(
         private readonly array $revokedErrors = ['invalid_grant'],
-        private readonly array $transientErrors = ['temporarily_unavailable', 'server_error'],
+        private readonly array $transientErrors = ['temporarily_unavailable', 'server_error', 'concurrent_request'],
     ) {}
 
     public function classify(Throwable $error): Classification
