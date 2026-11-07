@@ -39,8 +39,14 @@ class SalesforceController extends Controller
         $state = $request->session()->pull('salesforce_state');
         abort_unless(is_string($state) && hash_equals($state, (string) $request->query('state')), 403, 'Invalid OAuth state.');
 
+        // The user denied access, or the provider reported another error: there is no code to exchange.
+        abort_if($request->query('error') !== null, 400, 'The authorisation was not granted.');
+        abort_unless(is_string($request->query('code')) && $request->query('code') !== '', 400, 'No authorisation code in the callback.');
+
         $provider = $this->salesforce->provider();
-        $provider->setPkceCode((string) $request->session()->pull('salesforce_pkce'));
+        $verifier = $request->session()->pull('salesforce_pkce');
+        abort_unless(is_string($verifier) && $verifier !== '', 400, 'The PKCE verifier is missing; connect again.');
+        $provider->setPkceCode($verifier);
         $token = $provider->getAccessToken('authorization_code', ['code' => (string) $request->query('code')]);
         abort_unless($token instanceof AccessToken, 500);
 

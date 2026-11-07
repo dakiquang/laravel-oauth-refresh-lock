@@ -38,6 +38,10 @@ class MicrosoftController extends Controller
         $state = $request->session()->pull('microsoft_state');
         abort_unless(is_string($state) && hash_equals($state, (string) $request->query('state')), 403, 'Invalid OAuth state.');
 
+        // The user denied access, or the provider reported another error: there is no code to exchange.
+        abort_if($request->query('error') !== null, 400, 'The authorisation was not granted.');
+        abort_unless(is_string($request->query('code')) && $request->query('code') !== '', 400, 'No authorisation code in the callback.');
+
         $token = $this->microsoft->provider()->getAccessToken('authorization_code', ['code' => (string) $request->query('code')]);
         abort_unless($token instanceof AccessToken, 500);
 
