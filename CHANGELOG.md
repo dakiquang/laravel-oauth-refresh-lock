@@ -9,4 +9,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Package skeleton: service provider, CI matrix for PHP 8.1–8.5 and Laravel 10–13.
+- Package skeleton: service provider, CI matrix for PHP 8.2–8.5 and Laravel 11–13.
