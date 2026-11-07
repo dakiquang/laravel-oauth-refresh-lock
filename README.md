@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/dakiquang/laravel-oauth-refresh-lock/actions/workflows/ci.yml/badge.svg)](https://github.com/dakiquang/laravel-oauth-refresh-lock/actions/workflows/ci.yml)
 
-> **Work in progress.** Not released yet. The API below may change before v0.1.0.
+> **Early release (0.x).** The API may still change before 1.0; changes are listed in the [changelog](CHANGELOG.md).
 
 Prevents the OAuth2 refresh token race condition in Laravel: when several queue workers refresh the same token at once, providers that retire the old refresh token at once answer the losers with `invalid_grant`, and some revoke the connection. One refresh per expiry; the other workers wait and use the token it stored.
 
@@ -184,7 +184,7 @@ It serialises jobs that share a key, but it does not cover web requests, command
 That the refresh token you sent was already exchanged for a new one (rotation) or has been revoked. Providers word it differently, and most answer with the standard `invalid_grant`. If it happens when several processes run at once, it is the race this package prevents.
 
 **Which cache store do I need?**
-One that supports atomic locks and is shared by every server that runs workers: Redis, Memcached, DynamoDB or the database store. `file` and `array` locks only work on one server. A store without locks, such as `null`, is refused with `LockStoreNotSupported`.
+One that supports atomic locks and is shared by every server that runs workers: Redis, Memcached, DynamoDB or the database store. `file` locks only coordinate processes on one server (they share the disk); `array` locks live in one process's memory, so they cannot coordinate separate workers at all. A store without locks, such as `null`, is refused with `LockStoreNotSupported`.
 
 **My provider does not return `expires_in` (Salesforce). How does it know when to refresh?**
 Store the token without an expiry and report a 401 with `rejected($accessToken)`; see [When the provider rejects the access token](#when-the-provider-rejects-the-access-token).
@@ -205,7 +205,7 @@ Yes. The grace period hides duplicate refreshes, but each one still issues anoth
 
 - The lock serialises refreshes within one application that shares one cache store. Two different applications using the same OAuth connection are not coordinated.
 - The lock is a lease. Keep the refresh call's HTTP timeout well below `lock_seconds`; if a refresh outlives the lease, another worker can refresh too. The compare-and-swap keeps the first result stored; if the other worker recorded a revocation of exactly the generation the slow worker rotated, the slow worker stores its tokens instead. Providers that punish reuse may already have revoked the connection, and the other worker's caller may have seen `TokenRevoked`. See [How it works](docs/how-it-works.md#a-refresh-that-outlives-the-lock).
-- `file` and `array` cache locks only work within one server.
+- `file` cache locks only coordinate processes on one server; `array` locks only work inside one process (fine for tests, not for workers).
 
 ## Status
 
