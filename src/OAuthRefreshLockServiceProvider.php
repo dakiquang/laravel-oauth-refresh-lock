@@ -13,6 +13,7 @@ use Illuminate\Cache\NullStore;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Config\Repository as Config;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use UnexpectedValueException;
@@ -38,6 +39,7 @@ class OAuthRefreshLockServiceProvider extends ServiceProvider
                 skewSeconds: $this->int($config->get('oauth-refresh-lock.skew_seconds'), 120),
                 lockSeconds: $this->int($config->get('oauth-refresh-lock.lock_seconds'), 30),
                 waitSeconds: $this->int($config->get('oauth-refresh-lock.wait_seconds'), 10),
+                events: $this->resolve($app, Dispatcher::class),
             );
         });
     }

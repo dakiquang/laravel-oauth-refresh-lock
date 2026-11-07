@@ -9,6 +9,9 @@ use Closure;
 use Dakiquang\OAuthRefreshLock\Contracts\ErrorClassifier;
 use Dakiquang\OAuthRefreshLock\Contracts\Refresher;
 use Dakiquang\OAuthRefreshLock\Contracts\TokenStore;
+use Dakiquang\OAuthRefreshLock\Events\TokenRefreshed;
+use Dakiquang\OAuthRefreshLock\Events\TokenRefreshFailed;
+use Dakiquang\OAuthRefreshLock\Events\TokenRevokedByProvider;
 use Dakiquang\OAuthRefreshLock\Exceptions\RefreshLockTimeout;
 use Dakiquang\OAuthRefreshLock\Exceptions\TokenNotFound;
 use Dakiquang\OAuthRefreshLock\Exceptions\TokenRevoked;
@@ -16,6 +19,7 @@ use Dakiquang\OAuthRefreshLock\Exceptions\TransientRefreshFailure;
 use Dakiquang\OAuthRefreshLock\Refreshers\CallbackRefresher;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\DetectsConcurrencyErrors;
 use Illuminate\Database\QueryException;
 use Throwable;
@@ -46,6 +50,7 @@ class RefreshCoordinator
         private readonly int $skewSeconds = 120,
         private readonly int $lockSeconds = 30,
         private readonly int $waitSeconds = 10,
+        private readonly ?Dispatcher $events = null,
     ) {}
 
     public function for(string $key): PendingRefresh
@@ -75,7 +80,20 @@ class RefreshCoordinator
 
         $refresher = $refresher instanceof Closure ? new CallbackRefresher($refresher) : $refresher;
 
-        return $this->underLock($key, $waitSeconds, fn (): StoredToken => $this->refreshWhileLocked($key, $refresher, $skewSeconds));
+        // Events are collected under the lock and dispatched once it is released,
+        // so slow listeners never hold the lock. As with any synchronous Laravel
+        // listener, a listener's exception reaches the caller: after a refresh the
+        // token is already stored; after a failure the original error is its previous.
+        $events = [];
+        try {
+            return $this->underLock($key, $waitSeconds, function () use ($key, $refresher, $skewSeconds, &$events): StoredToken {
+                return $this->refreshWhileLocked($key, $refresher, $skewSeconds, $events);
+            });
+        } finally {
+            foreach ($events as $event) {
+                $this->events?->dispatch($event);
+            }
+        }
     }
 
     /**
@@ -135,7 +153,10 @@ class RefreshCoordinator
         }
     }
 
-    private function refreshWhileLocked(string $key, Refresher $refresher, int $skewSeconds): StoredToken
+    /**
+     * @param  list<object>  $events
+     */
+    private function refreshWhileLocked(string $key, Refresher $refresher, int $skewSeconds, array &$events): StoredToken
     {
         // Read again: the process that held the lock before us may have refreshed already.
         $current = $this->load($key);
@@ -147,12 +168,14 @@ class RefreshCoordinator
         try {
             $refreshed = $refresher->refresh($current);
         } catch (Throwable $error) {
-            return $this->fail($key, $current, $error);
+            return $this->fail($key, $current, $error, $events);
         }
 
         $next = $current->withRefreshed($refreshed);
 
         if ($this->store->put($key, $next, expectedVersion: $current->version)) {
+            $events[] = new TokenRefreshed($key, $next->version, $next->expiresAt);
+
             return $next;
         }
 
@@ -163,6 +186,8 @@ class RefreshCoordinator
         if ($stored !== null && $stored->isRevoked() && $stored->revokedFromVersion === $current->version) {
             $restored = $stored->withRefreshed($refreshed);
             if ($this->store->put($key, $restored, expectedVersion: $stored->version)) {
+                $events[] = new TokenRefreshed($key, $restored->version, $restored->expiresAt);
+
                 return $restored;
             }
         }
@@ -172,22 +197,26 @@ class RefreshCoordinator
     }
 
     /**
+     * @param  list<object>  $events
+     *
      * @throws TokenRevoked|TransientRefreshFailure|Throwable
      */
-    private function fail(string $key, StoredToken $current, Throwable $error): StoredToken
+    private function fail(string $key, StoredToken $current, Throwable $error, array &$events): StoredToken
     {
         $classification = $this->classifier->classify($error);
 
-        if ($classification->failure === RefreshFailure::Transient) {
-            throw new TransientRefreshFailure($key, $classification->code, $error);
-        }
-
         if ($classification->failure !== RefreshFailure::Revoked) {
-            throw $error;
+            $events[] = new TokenRefreshFailed($key, $classification->failure, $classification->code);
+
+            throw $classification->failure === RefreshFailure::Transient
+                ? new TransientRefreshFailure($key, $classification->code, $error)
+                : $error;
         }
 
         $revoked = $current->withRevoked($classification->code, CarbonImmutable::now());
         if ($this->store->put($key, $revoked, expectedVersion: $current->version)) {
+            $events[] = new TokenRevokedByProvider($key, $classification->code);
+
             throw new TokenRevoked($key, $classification->code, $error);
         }
 
