@@ -48,9 +48,8 @@ final class EloquentTokenStore implements TokenStore
         unset($attributes['version']);
         $query = $model->newQuery()->toBase();
         $grammar = $query->getGrammar();
-        /** @var literal-string $increment Only identifiers quoted by the grammar; no input reaches it. */
-        $increment = $grammar->wrapTable($model->getTable()).'.'.$grammar->wrap('version').' + 1';
-        $nextVersion = $model->getConnection()->raw($increment);
+        // Only identifiers quoted by the grammar go into this expression; no input reaches it.
+        $nextVersion = $model->getConnection()->raw($grammar->wrapTable($model->getTable()).'.'.$grammar->wrap('version').' + 1');
 
         $query->upsert(
             [[...$attributes, 'key' => $key, 'version' => Versions::initial(), 'created_at' => $now, 'updated_at' => $now]],

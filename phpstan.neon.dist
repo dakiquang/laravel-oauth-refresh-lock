@@ -3,3 +3,11 @@ parameters:
     paths:
         - src
     tmpDir: build/phpstan
+    ignoreErrors:
+        # Laravel 13 types Connection::raw() as literal-string. The increment is built only from
+        # identifiers quoted by the query grammar. Laravel 12 does not report it, hence reportUnmatched.
+        -
+            identifier: argument.type
+            message: '#Connection::raw\(\) expects float\|int\|literal-string#'
+            path: src/Stores/EloquentTokenStore.php
+            reportUnmatched: false
