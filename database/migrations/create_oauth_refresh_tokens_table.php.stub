@@ -8,9 +8,16 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    public function getConnection(): ?string
+    {
+        $connection = config('oauth-refresh-lock.connection');
+
+        return is_string($connection) ? $connection : null;
+    }
+
     public function up(): void
     {
-        Schema::create(config('oauth-refresh-lock.table', 'oauth_refresh_tokens'), function (Blueprint $table) {
+        Schema::connection($this->getConnection())->create($this->table(), function (Blueprint $table) {
             $table->id();
             $table->string('key', 191)->unique();
             $table->text('access_token');            // encrypted
@@ -27,6 +34,13 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists(config('oauth-refresh-lock.table', 'oauth_refresh_tokens'));
+        Schema::connection($this->getConnection())->dropIfExists($this->table());
+    }
+
+    private function table(): string
+    {
+        $table = config('oauth-refresh-lock.table');
+
+        return is_string($table) ? $table : 'oauth_refresh_tokens';
     }
 };
