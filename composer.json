@@ -33,7 +33,7 @@
         "league/oauth2-client": "^2.7",
         "orchestra/testbench": "^8.0 || ^9.0 || ^10.0 || ^11.0",
         "phpstan/phpstan": "^2.0",
-        "phpunit/phpunit": "^10.5 || ^11.5 || ^12.0"
+        "phpunit/phpunit": "^13.4.6"
     },
     "suggest": {
         "league/oauth2-client": "Use LeagueRefresher to refresh tokens for any league/oauth2-client provider."
