@@ -251,6 +251,30 @@ class RefreshCoordinatorTest extends TestCase
         $this->assertSame(1, $this->locks->locksRequested);
     }
 
+    public function test_a_replacement_that_is_about_to_expire_is_refreshed_like_any_token(): void
+    {
+        // Another worker replaced the rejected token, but the replacement expires within the skew.
+        $this->store->put(self::KEY, new StoredToken('access-other', 'refresh-other', $this->now->addSeconds(60)));
+
+        $this->assertSame('access-1', $this->coordinator()->for(self::KEY)->rejected('access-0')->accessToken($this->refresher()));
+        $this->assertSame(1, $this->refreshCalls);
+    }
+
+    public function test_a_provider_that_returns_the_same_access_token_causes_one_refresh_per_report(): void
+    {
+        $this->store->put(self::KEY, new StoredToken('same', 'refresh-0', null));
+        $refresher = function (): RefreshedToken {
+            $this->refreshCalls++;
+
+            return RefreshedToken::fromExpiresIn('same', 'refresh-'.$this->refreshCalls, null);
+        };
+
+        $this->coordinator()->for(self::KEY)->rejected('same')->token($refresher);
+        $this->coordinator()->for(self::KEY)->rejected('same')->token($refresher);
+
+        $this->assertSame(2, $this->refreshCalls, 'documented limit: the value cannot tell that a refresh happened');
+    }
+
     public function test_rejected_survives_skew_and_wait(): void
     {
         $this->store->put(self::KEY, new StoredToken('access-0', 'refresh-0', null));

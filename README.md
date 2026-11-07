@@ -109,7 +109,7 @@ if ($response->status() === 401) {
 }
 ```
 
-`rejected()` refreshes the token whatever its expiry, under the same lock. If another worker has already replaced that access token, the stored token is returned without a refresh, so many workers hitting the same 401 still cause one refresh.
+`rejected()` refreshes the token whatever its expiry, under the same lock. If another worker has already replaced that access token, the replacement is used like any stored token (returned as is unless it is about to expire), so many workers hitting the same 401 still cause one refresh. A completed refresh is recognised by the new access token value; a provider that returned the same value again would cause one refresh per caller that reported it.
 
 ### Disconnect
 

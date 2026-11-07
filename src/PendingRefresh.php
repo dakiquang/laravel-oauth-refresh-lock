@@ -37,7 +37,12 @@ final class PendingRefresh
      * The provider rejected this access token (for example with HTTP 401), so
      * refresh it whatever its expiry. Needed for providers that do not say when
      * access tokens expire. When another process has already replaced it, the
-     * stored token is returned without a refresh.
+     * replacement is used like any stored token: returned as is, unless it is
+     * itself about to expire.
+     *
+     * A completed refresh is recognised by the new access token value. If a
+     * provider returned the same value again, each caller that reported it would
+     * refresh once more.
      */
     public function rejected(string $accessToken): self
     {
