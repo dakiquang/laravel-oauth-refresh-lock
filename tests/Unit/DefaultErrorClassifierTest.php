@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Dakiquang\OAuthRefreshLock\Tests\Unit;
 
 use Dakiquang\OAuthRefreshLock\Classifiers\DefaultErrorClassifier;
+use Dakiquang\OAuthRefreshLock\Exceptions\UnreadableTokenResponse;
 use Dakiquang\OAuthRefreshLock\RefreshFailure;
 use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\ConnectException;
@@ -19,6 +20,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Throwable;
+use UnexpectedValueException;
 
 class DefaultErrorClassifierTest extends TestCase
 {
@@ -30,6 +32,10 @@ class DefaultErrorClassifierTest extends TestCase
         $request = new Request('POST', 'https://identity.example.test/connect/token');
         $json = fn (int $status, array $body): Response => new Response($status, ['Content-Type' => 'application/json'], (string) json_encode($body));
 
+        yield 'unreadable token response' => [
+            new UnreadableTokenResponse(new UnexpectedValueException('Invalid response received from Authorization Server. Expected JSON.')),
+            RefreshFailure::Transient, 'unreadable_response',
+        ];
         yield 'league invalid_grant' => [
             new IdentityProviderException('invalid_grant', 400, ['error' => 'invalid_grant']),
             RefreshFailure::Revoked, 'invalid_grant',

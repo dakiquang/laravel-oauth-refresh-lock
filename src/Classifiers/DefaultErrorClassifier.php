@@ -6,6 +6,7 @@ namespace Dakiquang\OAuthRefreshLock\Classifiers;
 
 use Dakiquang\OAuthRefreshLock\Classification;
 use Dakiquang\OAuthRefreshLock\Contracts\ErrorClassifier;
+use Dakiquang\OAuthRefreshLock\Exceptions\UnreadableTokenResponse;
 use GuzzleHttp\Exception\BadResponseException as GuzzleBadResponseException;
 use Illuminate\Http\Client\ConnectionException as LaravelConnectionException;
 use Illuminate\Http\Client\RequestException as LaravelRequestException;
@@ -19,8 +20,9 @@ use Throwable;
  * `instanceof` check against a class that is not installed is simply false.
  *
  * Order matters:
- * 1. Network errors and HTTP 408, 429, 5xx are transient, whatever the body
- *    says — a gateway or a struggling provider can return odd bodies.
+ * 1. Network errors, HTTP 408, 429, 5xx and token responses that cannot be
+ *    read are transient, whatever the body says — a gateway or a struggling
+ *    provider can return odd bodies.
  * 2. Only an OAuth `error` code listed in $revokedErrors revokes the token.
  * 3. Everything else is unexpected and keeps the token, because wrongly
  *    revoking forces the user to reconnect.
@@ -38,6 +40,10 @@ final class DefaultErrorClassifier implements ErrorClassifier
     {
         if ($this->isNetworkError($error)) {
             return Classification::transient('network_error');
+        }
+
+        if ($error instanceof UnreadableTokenResponse) {
+            return Classification::transient('unreadable_response');
         }
 
         [$status, $oauthError] = $this->response($error);
