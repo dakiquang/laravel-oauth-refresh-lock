@@ -139,6 +139,23 @@ class ConcurrentRefreshTest extends TestCase
     }
 
     /**
+     * Providers such as Salesforce do not say when access tokens expire: the app
+     * learns it from a 401 and reports the token as rejected. All workers report
+     * the same rejected token at once; only one may refresh.
+     */
+    #[DataProvider('lockStores')]
+    public function test_a_rejected_token_is_refreshed_once_for_all_workers(string $lockStore): void
+    {
+        if ($lockStore === 'redis' && ! $this->redisAvailable()) {
+            $this->markTestSkipped('Redis is not reachable; set REDIS_HOST/REDIS_PORT to run this case.');
+        }
+
+        for ($round = 1; $round <= self::ROUNDS; $round++) {
+            $this->assertRoundIsSafe($round, $this->runRound($lockStore, $round, rejected: true));
+        }
+    }
+
+    /**
      * Control experiment: the same harness without a lock must observe the
      * race, otherwise the test above would prove nothing.
      */
@@ -152,13 +169,24 @@ class ConcurrentRefreshTest extends TestCase
         $this->assertGreaterThan(1, $maxRefreshes, 'without a lock several workers should refresh the same token');
     }
 
+    public function test_the_harness_detects_the_race_for_rejected_tokens_when_there_is_no_lock(): void
+    {
+        $maxRefreshes = 0;
+        for ($round = 1; $round <= self::ROUNDS; $round++) {
+            $maxRefreshes = max($maxRefreshes, count($this->runRound('none', $round, rejected: true)['refreshes']));
+        }
+
+        $this->assertGreaterThan(1, $maxRefreshes, 'without a lock several workers should refresh the same rejected token');
+    }
+
     /**
      * @return array{refreshes: list<string>, results: list<string>, versionsAdded: int}
      */
-    private function runRound(string $lockStore, int $round): array
+    private function runRound(string $lockStore, int $round, bool $rejected = false): array
     {
         $store = new EloquentTokenStore;
-        $store->put(self::KEY, new StoredToken('access-old', 'refresh-old', CarbonImmutable::now()->addSeconds(10)));
+        // A rejected token has no expiry, like a Salesforce token: only the rejection triggers the refresh.
+        $store->put(self::KEY, new StoredToken('access-old', 'refresh-old', $rejected ? null : CarbonImmutable::now()->addSeconds(10)));
         $seededVersion = $store->get(self::KEY)?->version ?? 0;
 
         $barrier = "{$this->dir}/start-{$round}";
@@ -172,7 +200,7 @@ class ConcurrentRefreshTest extends TestCase
                 $this->fail('fork failed');
             }
             if ($pid === 0) {
-                $this->worker($lockStore, $barrier, $refreshLog, $resultLog);
+                $this->worker($lockStore, $barrier, $refreshLog, $resultLog, $rejected);
             }
             $children[] = $pid;
         }
@@ -212,7 +240,7 @@ class ConcurrentRefreshTest extends TestCase
     /**
      * Runs in the forked child and never returns.
      */
-    private function worker(string $lockStore, string $barrier, string $refreshLog, string $resultLog): never
+    private function worker(string $lockStore, string $barrier, string $refreshLog, string $resultLog, bool $rejected): never
     {
         $line = getmypid().' ';
 
@@ -236,7 +264,8 @@ class ConcurrentRefreshTest extends TestCase
 
             $coordinator = new RefreshCoordinator(new EloquentTokenStore, $locks, new DefaultErrorClassifier, waitSeconds: 15);
 
-            $line .= $coordinator->for(self::KEY)->accessToken(function (StoredToken $token) use ($refreshLog): RefreshedToken {
+            $pending = $coordinator->for(self::KEY);
+            $line .= ($rejected ? $pending->rejected('access-old') : $pending)->accessToken(function (StoredToken $token) use ($refreshLog): RefreshedToken {
                 $me = (string) getmypid();
                 file_put_contents($refreshLog, $me."\n", FILE_APPEND | LOCK_EX);
                 usleep(300_000); // a slow token endpoint widens the race window

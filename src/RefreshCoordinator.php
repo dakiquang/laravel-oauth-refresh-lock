@@ -61,6 +61,8 @@ class RefreshCoordinator
     /**
      * A token whose access token is valid for at least $skewSeconds.
      * A token stored without an expiry is returned as is: there is nothing to compare.
+     * With $rejectedAccessToken, the token is also refreshed when it is still
+     * that access token, whatever its expiry.
      *
      * @param  Refresher|Closure(StoredToken): RefreshedToken  $refresher
      *
@@ -69,12 +71,12 @@ class RefreshCoordinator
      * @throws TransientRefreshFailure when the refresh failed temporarily; the token was kept
      * @throws RefreshLockTimeout when another process held the lock longer than $waitSeconds
      */
-    public function token(string $key, Refresher|Closure $refresher, int $skewSeconds, int $waitSeconds): StoredToken
+    public function token(string $key, Refresher|Closure $refresher, int $skewSeconds, int $waitSeconds, ?string $rejectedAccessToken = null): StoredToken
     {
         $token = $this->load($key);
 
-        // Fast path: no lock while the token is still fresh.
-        if (! $token->expiresWithin($skewSeconds, CarbonImmutable::now())) {
+        // Fast path: no lock while the token is still usable.
+        if (! $this->needsRefresh($token, $skewSeconds, $rejectedAccessToken)) {
             return $token;
         }
 
@@ -86,8 +88,8 @@ class RefreshCoordinator
         // token is already stored; after a failure the original error is its previous.
         $events = [];
         try {
-            return $this->underLock($key, $waitSeconds, function () use ($key, $refresher, $skewSeconds, &$events): StoredToken {
-                return $this->refreshWhileLocked($key, $refresher, $skewSeconds, $events);
+            return $this->underLock($key, $waitSeconds, function () use ($key, $refresher, $skewSeconds, $rejectedAccessToken, &$events): StoredToken {
+                return $this->refreshWhileLocked($key, $refresher, $skewSeconds, $rejectedAccessToken, $events);
             });
         } finally {
             foreach ($events as $event) {
@@ -156,12 +158,12 @@ class RefreshCoordinator
     /**
      * @param  list<object>  $events
      */
-    private function refreshWhileLocked(string $key, Refresher $refresher, int $skewSeconds, array &$events): StoredToken
+    private function refreshWhileLocked(string $key, Refresher $refresher, int $skewSeconds, ?string $rejectedAccessToken, array &$events): StoredToken
     {
         // Read again: the process that held the lock before us may have refreshed already.
         $current = $this->load($key);
 
-        if (! $current->expiresWithin($skewSeconds, CarbonImmutable::now())) {
+        if (! $this->needsRefresh($current, $skewSeconds, $rejectedAccessToken)) {
             return $current;
         }
 
@@ -223,6 +225,12 @@ class RefreshCoordinator
         // The version moved while we called the provider: someone refreshed or
         // reconnected, so our refresh token was just stale. Use what they stored.
         return $this->load($key);
+    }
+
+    private function needsRefresh(StoredToken $token, int $skewSeconds, ?string $rejectedAccessToken): bool
+    {
+        return $token->expiresWithin($skewSeconds, CarbonImmutable::now())
+            || ($rejectedAccessToken !== null && hash_equals($token->accessToken, $rejectedAccessToken));
     }
 
     private function load(string $key): StoredToken

@@ -94,6 +94,23 @@ $accessToken = OAuthRefreshLock::for($key)->accessToken(function (StoredToken $c
 
 `token()` returns the whole `StoredToken` instead of the access token. `skew($seconds)` and `wait($seconds)` override the config for one call.
 
+### When the provider rejects the access token
+
+Some providers do not say when access tokens expire (Salesforce, for example, returns no `expires_in`), and any provider can revoke an access token early. Then you learn it from a 401. Report the rejected token and retry once:
+
+```php
+$pending = OAuthRefreshLock::for($key);
+$accessToken = $pending->accessToken($refresher);
+
+$response = Http::withToken($accessToken)->get($url);
+if ($response->status() === 401) {
+    $accessToken = $pending->rejected($accessToken)->accessToken($refresher);
+    $response = Http::withToken($accessToken)->get($url);
+}
+```
+
+`rejected()` refreshes the token whatever its expiry, under the same lock. If another worker has already replaced that access token, the replacement is used like any stored token (returned as is unless it is about to expire), so many workers hitting the same 401 still cause one refresh. A completed refresh is recognised by the new access token value; a provider that returned the same value again would cause one refresh per caller that reported it.
+
 ### Disconnect
 
 ```php
