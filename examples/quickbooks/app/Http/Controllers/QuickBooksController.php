@@ -8,6 +8,8 @@ use App\QuickBooks\QuickBooks;
 use Dakiquang\OAuthRefreshLock\Exceptions\TokenNotFound;
 use Dakiquang\OAuthRefreshLock\Exceptions\TokenRevoked;
 use Dakiquang\OAuthRefreshLock\Exceptions\TransientRefreshFailure;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -37,6 +39,7 @@ class QuickBooksController extends Controller
 
         $realmId = (string) $request->query('realmId');
         $token = $this->quickBooks->provider()->getAccessToken('authorization_code', ['code' => (string) $request->query('code')]);
+        abort_unless($this->quickBooks->tokenBelongsTo($realmId, $token), 400, 'The company does not match the authorisation.');
         $this->quickBooks->connect($realmId, $token);
         $request->session()->put('quickbooks_realm', $realmId);
 
@@ -57,6 +60,8 @@ class QuickBooksController extends Controller
             return redirect('/quickbooks/connect');
         } catch (TransientRefreshFailure $failure) {
             return response()->json(['error' => 'QuickBooks is unavailable, try again later.', 'code' => $failure->errorCode], 503);
+        } catch (ConnectionException|RequestException) {
+            return response()->json(['error' => 'The QuickBooks API call failed.'], 502);
         }
     }
 

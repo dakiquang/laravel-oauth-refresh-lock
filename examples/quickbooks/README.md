@@ -52,7 +52,7 @@ php artisan serve
 php artisan quickbooks:race <realmId> --workers=6
 ```
 
-The command moves the stored access token's expiry into the past and starts six processes that all need a token at once. Expected output: one process refreshed the token, the others waited for the lock and used the token it stored.
+The command moves the stored access token's expiry into the past and starts six processes that all need a token at once. Expected output: one process refreshed the token, the others waited for the lock and used the token it stored. The command fails if a process failed or the token was not refreshed exactly once.
 
 ```text
 pid 82927: used the stored token, company "…"
@@ -65,9 +65,10 @@ pid 82931: REFRESHED the token, company "…"
 
 - `QuickBooks::provider()` is league/oauth2-client's `GenericProvider` with Intuit's endpoints. Intuit's token endpoint accepts the client credentials in the request body or as HTTP Basic (`client_secret_post`, `client_secret_basic` in its [discovery document](https://developer.api.intuit.com/.well-known/openid_sandbox_configuration)), so no Intuit-specific provider package is needed.
 - One token per company, under the key `quickbooks:{realmId}`.
+- The `realmId` in the callback URL comes from the browser, so the callback first calls CompanyInfo for that realm with the new access token. A token only works for the company it was issued for, so a tampered `realmId` is rejected before anything is stored.
 - The callback stores the token under the refresh lock (`withLock`), so a refresh that is still running for an older connection cannot overwrite it.
 - Every API call takes its token from `accessToken()` with a `LeagueRefresher`.
-- When Intuit rejects the refresh token, `/quickbooks/company` sends the user back to connect. When Intuit is unavailable, it answers 503 and keeps the token.
+- When Intuit rejects the refresh token, `/quickbooks/company` sends the user back to connect. When the token refresh fails temporarily, it answers 503 and keeps the token; when the CompanyInfo call itself fails, it answers 502.
 - The connected company is kept in the session to keep the example short. A real app stores the realm ID with its own account.
 - `disconnect` forgets the stored token. It does not revoke it at Intuit; to do that, call Intuit's revocation endpoint (listed in the discovery document) before forgetting it.
 

@@ -9,6 +9,7 @@ use Dakiquang\OAuthRefreshLock\Contracts\TokenStore;
 use Dakiquang\OAuthRefreshLock\Facades\OAuthRefreshLock;
 use Dakiquang\OAuthRefreshLock\Refreshers\LeagueRefresher;
 use Dakiquang\OAuthRefreshLock\StoredToken;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use League\OAuth2\Client\Provider\GenericProvider;
 use League\OAuth2\Client\Token\AccessTokenInterface;
@@ -67,11 +68,24 @@ final class QuickBooks
      */
     public function companyInfo(string $realmId): array
     {
-        return Http::withToken($this->accessToken($realmId))
+        return $this->companyInfoRequest($realmId, $this->accessToken($realmId))->throw()->json('CompanyInfo') ?? [];
+    }
+
+    /**
+     * The realm ID in the callback URL comes from the browser. A token only
+     * works for the company it was issued for, so ask that company's API.
+     */
+    public function tokenBelongsTo(string $realmId, AccessTokenInterface $token): bool
+    {
+        return preg_match('/^\d+$/', $realmId) === 1
+            && $this->companyInfoRequest($realmId, $token->getToken())->successful();
+    }
+
+    private function companyInfoRequest(string $realmId, string $accessToken): Response
+    {
+        return Http::withToken($accessToken)
             ->acceptJson()
-            ->get(config('quickbooks.api_base')."/v3/company/{$realmId}/companyinfo/{$realmId}")
-            ->throw()
-            ->json('CompanyInfo') ?? [];
+            ->get(config('quickbooks.api_base')."/v3/company/{$realmId}/companyinfo/{$realmId}");
     }
 
     /**

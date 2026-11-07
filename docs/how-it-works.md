@@ -35,7 +35,7 @@ sequenceDiagram
 1. **Fast path.** A token that does not expire within `skew_seconds` is returned without touching the lock.
 2. **One lock per key.** Workers that need a refresh take `lock_prefix + key` from the configured cache store and wait up to `wait_seconds` for it.
 3. **Read again inside the lock.** The worker that waited usually finds the token the previous holder just stored and returns it.
-4. **Compare-and-swap write.** The refreshed token is stored only if the stored version is still the one that was read. If someone else wrote in the meantime (a reconnect, a disconnect), their write wins and is returned.
+4. **Compare-and-swap write.** The refreshed token is stored only if the stored version is still the one that was read. If someone else wrote in the meantime, their write wins: after a reconnect the new token is returned, after a disconnect the caller gets `TokenNotFound`.
 
 Writes from the app (connect, reconnect) are unconditional, and the store decides their version: an existing key moves to version + 1, a new key starts from a time-based value. So a worker holding an old read can never win a compare-and-swap against a newer connection, even one made after the key was forgotten.
 
@@ -47,7 +47,9 @@ The lock is a lease of `lock_seconds`. If the provider call takes longer:
 2. Worker B takes the lock, reads the token, sends the same refresh token. If A's refresh already went through, the provider answers `invalid_grant`, and B stores the token as revoked and throws `TokenRevoked` (and dispatches `TokenRevokedByProvider`).
 3. A's call returns the new, valid tokens. A's compare-and-swap fails because B wrote. A sees a revocation of exactly the generation it rotated (`revokedFromVersion`), so the revocation was caused by its own rotation, and it stores its valid tokens (and dispatches `TokenRefreshed`).
 
-So the stored token ends up valid, but B's caller has seen `TokenRevoked`. Keep the refresh call's HTTP timeout well below `lock_seconds` so this stays rare, and check the stored token before acting on a revocation event.
+This only helps if the provider still accepts A's new tokens. Providers with a grace period for the previous refresh token (Xero) or no revocation on reuse may; providers that punish reuse may revoke the whole connection, A's new tokens included (Salesforce with Refresh Token Rotation; Intuit may). Then the user has to connect again whatever the package stores. B's caller has seen `TokenRevoked` in any case.
+
+Keep the refresh call's HTTP timeout well below `lock_seconds` so this does not happen, and check the stored token before acting on a revocation event.
 
 ## When the lock store fails
 

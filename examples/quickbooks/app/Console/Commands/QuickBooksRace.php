@@ -43,9 +43,20 @@ class QuickBooksRace extends Command
             }
         })->start()->wait();
 
+        $refreshes = 0;
         foreach ($results->collect() as $result) {
             $this->line(trim($result->output()) ?: trim($result->errorOutput()));
+            $refreshes += substr_count($result->output(), 'REFRESHED');
         }
+
+        $allSucceeded = $results->collect()->every(fn ($result): bool => $result->successful());
+        if (! $allSucceeded || $refreshes !== 1) {
+            $this->error("Expected every process to succeed and exactly one refresh; got {$refreshes} refreshes.");
+
+            return self::FAILURE;
+        }
+
+        $this->info("{$workers} processes, 1 refresh.");
 
         return self::SUCCESS;
     }

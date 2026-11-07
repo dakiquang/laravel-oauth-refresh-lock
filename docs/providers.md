@@ -27,12 +27,12 @@ See [examples/quickbooks](../examples/quickbooks) for a working setup with leagu
 ## Salesforce (Refresh Token Rotation)
 
 - With Refresh Token Rotation on, every refresh returns a new refresh token and the previous one is invalidated immediately. It is on by default, and cannot be turned off, for new External Client Apps since 22/10/2026.
-- Reusing an invalidated refresh token returns `invalid_grant` and revokes the current refresh token and its access tokens, so the client must authenticate again.
+- Reusing an invalidated refresh token revokes the current refresh token and its access tokens, so the client must authenticate again. The article's example error for an expired refresh token is `invalid_grant`.
 - Source: [Refresh Token Rotation](https://help.salesforce.com/s/articleView?id=005316711&type=1), [External Client App defaults](https://help.salesforce.com/s/articleView?id=005390912&type=1).
 
 ## Xero
 
-- Every refresh returns a new refresh token. The previous one can still be used for a grace period of 30 minutes, then the user must authorise again.
+- Every refresh returns a new refresh token. The previous one can still be used for a grace period of 30 minutes; after that it no longer works.
 - Refresh tokens are valid for up to 60 days. Access tokens last 30 minutes.
 - Not stated by Xero: the error for a refresh token used after the grace period, and whether reuse is detected.
 - Source: [Token types](https://developer.xero.com/documentation/guides/oauth2/token-types), [Auth flow](https://developer.xero.com/documentation/guides/oauth2/auth-flow).

@@ -85,7 +85,7 @@ $accessToken = OAuthRefreshLock::for("quickbooks:{$realmId}")
 use Dakiquang\OAuthRefreshLock\RefreshedToken;
 use Dakiquang\OAuthRefreshLock\StoredToken;
 
-$accessToken = OAuthRefreshLock::for($key)->accessToken(function (StoredToken $current): RefreshedToken {
+$accessToken = OAuthRefreshLock::for($key)->accessToken(function (StoredToken $current) use ($sdk): RefreshedToken {
     $response = $sdk->refresh($current->refreshToken);   // throw what the SDK throws
 
     return RefreshedToken::fromExpiresIn($response->accessToken, $response->refreshToken, $response->expiresIn);
@@ -112,6 +112,8 @@ OAuthRefreshLock::for($key)->withLock(fn (TokenStore $store) => $store->forget($
 
 This package's exception messages contain the key and a short error code, never token values or provider responses; the provider's error is available as `getPrevious()`. To classify errors differently, bind your own `Dakiquang\OAuthRefreshLock\Contracts\ErrorClassifier`.
 
+Stack traces are another matter: with `zend.exception_ignore_args` off (the `php.ini-development` default), a trace of the SDK's exception can show the refresh token as a function argument. Keep it on in production, as `php.ini-production` does, and be careful with traces from local runs.
+
 ### Events
 
 `TokenRefreshed`, `TokenRefreshFailed` and `TokenRevokedByProvider` (in `Dakiquang\OAuthRefreshLock\Events`) are dispatched after the lock is released. They carry the key, version, expiry or error code, never token values. Check the stored token before acting on `TokenRevokedByProvider`: see [How it works](docs/how-it-works.md#a-refresh-that-outlives-the-lock).
@@ -131,7 +133,7 @@ Rotation rules differ a lot between providers: for some, a duplicate refresh can
 ## Limits
 
 - The lock serialises refreshes within one application that shares one cache store. Two different applications using the same OAuth connection are not coordinated.
-- The lock is a lease. Keep the refresh call's HTTP timeout well below `lock_seconds`; if a refresh outlives the lease, the package detects it and restores the valid token, but another worker may already have seen `TokenRevoked`.
+- The lock is a lease. Keep the refresh call's HTTP timeout well below `lock_seconds`; if a refresh outlives the lease, another worker can send the retired refresh token. The package then keeps the newest token it received, but providers that punish reuse may already have revoked the connection, and that worker's caller has seen `TokenRevoked`. See [How it works](docs/how-it-works.md#a-refresh-that-outlives-the-lock).
 - `file` and `array` cache locks only work within one server.
 
 ## Status
