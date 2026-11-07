@@ -4,7 +4,7 @@ A connect / call / disconnect flow for QuickBooks Online, plus a command that sh
 
 QuickBooks is a good test case: when two refreshes use the same refresh token, the second gets `invalid_grant` and Intuit may revoke the refresh tokens, so the user has to authorise again ([Intuit's FAQ](https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/faq)). More in [docs/providers.md](../../docs/providers.md).
 
-> **Verified on 07/11/2026 against a QuickBooks Online sandbox company** (Laravel 12, PHP 8.4, `database` cache locks): connect, CompanyInfo, and `quickbooks:race --workers=6` three times, each with one refresh and no `invalid_grant`. Error paths (wrong `state`, another company's `realmId`, Intuit unavailable, rejected refresh token) were tested against a local stand-in for Intuit. If something differs for you, please open an issue.
+> **Verified on 7 November 2026 against a QuickBooks Online sandbox company** (Laravel 12, PHP 8.4, `database` cache locks): connect, CompanyInfo, and `quickbooks:race --workers=6` three times, each with one refresh and no `invalid_grant`. Error paths (wrong `state`, another company's `realmId`, Intuit unavailable, rejected refresh token) were tested against a local stand-in for Intuit. If something differs for you, please open an issue.
 
 ## What you need
 
@@ -72,9 +72,15 @@ pid 82931: REFRESHED the token, company "…"
 - The connected company is kept in the session to keep the example short. A real app stores the realm ID with its own account.
 - `disconnect` forgets the stored token. It does not revoke it at Intuit; to do that, call Intuit's revocation endpoint (listed in the discovery document) before forgetting it.
 
+## What was not tested
+
+No run without the lock against the sandbox: Intuit may revoke the refresh tokens on a duplicate refresh, which would end the sandbox connection. That risk comes from Intuit's FAQ, not from our own test.
+
 ## Sources
 
 - [Set up OAuth 2.0](https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/oauth-2.0): authorisation URL, the `com.intuit.quickbooks.accounting` scope, the `code`, `state` and `realmId` redirect parameters.
 - [Discovery document](https://developer.api.intuit.com/.well-known/openid_sandbox_configuration): authorisation and token endpoints.
 - [Create and test with a sandbox company](https://developer.intuit.com/app/developer/qbo/docs/develop/sandboxes/manage-your-sandboxes): sandbox base URL `https://sandbox-quickbooks.api.intuit.com/v3`.
 - [CompanyInfo API](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/companyinfo): `GET /v3/company/<realmID>/companyinfo/<realmID>`, production base URL `https://quickbooks.api.intuit.com`.
+
+See also: [provider notes](../../docs/providers.md#intuit-quickbooks-online) · [how it works](../../docs/how-it-works.md) · [README: when the provider rejects the access token](../../README.md#when-the-provider-rejects-the-access-token)

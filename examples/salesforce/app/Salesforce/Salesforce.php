@@ -75,8 +75,9 @@ final class Salesforce
     }
 
     /**
-     * Run a SOQL query. On 401 the token is reported as rejected and the call
-     * is retried once: workers that get the same 401 cause one refresh.
+     * Run a SOQL query. On 401 INVALID_SESSION_ID the token is reported as
+     * rejected and the call is retried once: workers that get the same 401 cause
+     * one refresh. Other errors are not a reason to rotate the refresh token.
      *
      * @return array<string, mixed>
      */
@@ -88,7 +89,7 @@ final class Salesforce
         $token = $pending->token($refresher);
         $response = $this->send($token, $soql);
 
-        if ($response->status() === 401) {
+        if ($this->sessionExpired($response)) {
             $token = $pending->rejected($token->accessToken)->token($refresher);
             $response = $this->send($token, $soql);
         }
@@ -99,6 +100,15 @@ final class Salesforce
     public function disconnect(string $orgId): void
     {
         OAuthRefreshLock::for(self::key($orgId))->withLock(fn (TokenStore $store) => $store->forget(self::key($orgId)));
+    }
+
+    /**
+     * Salesforce answers an expired or invalid access token with HTTP 401 and
+     * [{"message": "Session expired or invalid", "errorCode": "INVALID_SESSION_ID"}].
+     */
+    private function sessionExpired(Response $response): bool
+    {
+        return $response->status() === 401 && $response->json('0.errorCode') === 'INVALID_SESSION_ID';
     }
 
     private function send(StoredToken $token, string $soql): Response

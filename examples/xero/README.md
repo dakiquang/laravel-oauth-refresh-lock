@@ -2,7 +2,7 @@
 
 A Laravel example for the Xero API: connect a Xero organisation, call the Organisation endpoint, and a command that shows several queue workers refreshing one Xero token at the same time with exactly one refresh.
 
-> **Verified on 07/11/2026 against a real Xero demo organisation** (Laravel 12, PHP 8.4, `database` cache locks): connect, Organisation API, and `xero:race --workers=6` over several rounds, each with one refresh.
+> **Verified on 7 November 2026 against a real Xero demo organisation** (Laravel 12, PHP 8.4, `database` cache locks): connect, Organisation API, and `xero:race --workers=6` over several rounds, each with one refresh.
 
 ## Why Xero needs this
 
@@ -10,7 +10,11 @@ Xero rotates refresh tokens: every refresh returns a new refresh token. The prev
 
 The grace period hides the race. In a control run without any lock, six processes refreshed at the same moment with the same refresh token: all six succeeded and Xero issued six different new refresh tokens. Nothing fails in testing, but the app now has six token generations, keeps whichever was written last, and Xero does not document what happens to the others after 30 minutes. The lock makes sure only one refresh happens.
 
-Typical errors people search for: `invalid_grant` from `https://identity.xero.com/connect/token`, "Xero refresh token expired", "xero-php-oauth2 refresh token invalid_grant".
+### Symptoms
+
+- Refreshes "randomly" fail under load, or a connection that looked fine stops working later.
+- Many refresh tokens issued for one connection: each duplicate refresh within 30 minutes succeeds and returns another one.
+- When a refresh token is no longer accepted, the token endpoint (`https://identity.xero.com/connect/token`) answers with an OAuth error. Xero's documentation does not name it for a token used after the grace period; OAuth 2.0 (RFC 6749, section 5.2) defines `invalid_grant` for an invalid, expired or revoked refresh token, and that is what the default classifier treats as revoked.
 
 ## What you need
 
@@ -65,4 +69,4 @@ new GenericProvider([
 - When Xero rejects the refresh token, `/xero/organisation` sends the user back to connect; when the refresh fails temporarily it answers 503 and keeps the token; when the Organisation call itself fails it answers 502.
 - `disconnect` forgets the stored token. To remove the connection at Xero too, call `DELETE https://api.xero.com/connections/{id}` first.
 
-See also: [providers.md#xero](../../docs/providers.md#xero) · [How it works](../../docs/how-it-works.md)
+See also: [provider notes](../../docs/providers.md#xero) · [how it works](../../docs/how-it-works.md) · [README: when the provider rejects the access token](../../README.md#when-the-provider-rejects-the-access-token)

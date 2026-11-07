@@ -1,8 +1,8 @@
 # How it works: preventing concurrent OAuth token refreshes in Laravel
 
-## The refresh token race, step by step
+## The OAuth refresh token race condition, step by step
 
-With refresh token rotation, every refresh returns a new refresh token and the provider retires the old one (some immediately, some after a grace period, see [providers.md](providers.md)). Some providers also run refresh token reuse detection: a retired refresh token sent again is treated as a possible leak, and the whole token family is revoked.
+With refresh token rotation, every refresh returns a new refresh token and the provider retires the old one (some immediately, some after a grace period, see [providers.md](providers.md)). Some providers also run refresh token reuse detection: a retired refresh token sent again is treated as a possible leak, and the whole token family is revoked. Salesforce documents this for Refresh Token Rotation; Intuit may revoke QuickBooks tokens on a duplicate refresh.
 
 1. Worker A and worker B both read the token: the access token expires in a few seconds.
 2. Both call the token endpoint with the same refresh token.
@@ -10,7 +10,7 @@ With refresh token rotation, every refresh returns a new refresh token and the p
 4. B's call arrives with the retired refresh token: `invalid_grant`. With reuse detection, A's new tokens are revoked too.
 5. If the app treats `invalid_grant` as "the user disconnected", someone has to reconnect by hand.
 
-The fix is a single-flight refresh: per token, one worker refreshes and the others wait for its result.
+The fix is a single-flight refresh: per token, one worker refreshes and the others wait for its result. Runnable examples per provider: [README: providers and examples](../README.md#providers-and-examples).
 
 ## One refresh per expiry
 

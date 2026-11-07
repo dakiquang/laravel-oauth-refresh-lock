@@ -4,6 +4,8 @@ A Laravel example for Google OAuth 2.0 (web server apps): sign in, call the Open
 
 > **Written from Google's documentation and checked to boot in a Laravel 12 app; not yet run against a real Google account.** If something differs, please open an issue.
 
+> **Got here from `invalid_grant`?** Google does not rotate refresh tokens, so this is not a race between workers. Common causes: the refresh token was unused for 6 months, the user revoked access, the account went over 100 refresh tokens for your client (the oldest stop working), or the app is in "Testing" with external users (7-day refresh tokens). The default classifier reports it as `TokenRevoked`, so you can ask the user to sign in again.
+
 ## What Google does with refresh tokens
 
 - Google does **not rotate** refresh tokens: the refresh response has no `refresh_token`, and you keep using the one you have ([Google: web server apps](https://developers.google.com/identity/protocols/oauth2/web-server)). `LeagueRefresher` then keeps the stored refresh token. There is no rotation race; the lock still saves duplicate calls.
@@ -34,4 +36,4 @@ $url = $provider->getAuthorizationUrl(['access_type' => 'offline', 'prompt' => '
 3. `php artisan serve`, open `http://localhost:8000/google/connect`, then `/google/userinfo`.
 4. `php artisan google:race <sub> --workers=6`: expect one refresh.
 
-See also: [providers.md#google](../../docs/providers.md#google)
+See also: [provider notes](../../docs/providers.md#google) · [how it works](../../docs/how-it-works.md) · [README: when the provider rejects the access token](../../README.md#when-the-provider-rejects-the-access-token)

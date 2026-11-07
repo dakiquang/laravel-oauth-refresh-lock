@@ -6,10 +6,22 @@ A Laravel example for the Salesforce REST API: connect an org, run a SOQL query,
 
 ## Why Salesforce needs this
 
-- **Refresh Token Rotation.** With rotation on (the default, and locked, for new External Client Apps since 22/10/2026), every refresh returns a new refresh token and the previous one is invalidated at once. Reusing an invalidated refresh token revokes the current refresh token and its access tokens too ([Salesforce: Refresh Token Rotation](https://help.salesforce.com/s/articleView?id=005316711&type=1)). Two workers refreshing at once can end the connection.
+- **Refresh Token Rotation.** With rotation on (the default, and locked, for new External Client Apps since 22 October 2026), every refresh returns a new refresh token and the previous one is invalidated at once. Reusing an invalidated refresh token revokes the current refresh token and its access tokens too ([Salesforce: Refresh Token Rotation](https://help.salesforce.com/s/articleView?id=005316711&type=1)). Two workers refreshing at once can end the connection.
 - **No `expires_in`.** The token response has `access_token`, `refresh_token`, `instance_url`, `id`, `issued_at`, `signature`, but no expiry: the session timeout is set in Salesforce ([Salesforce: web server flow](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm&type=5)). An app learns the access token is dead when an API call answers 401 with `INVALID_SESSION_ID` ("Session expired or invalid", [REST API status codes](https://developer.salesforce.com/docs/platform/api-rest/guide/errorcodes.html)).
 
-Typical errors people search for: `{"error":"invalid_grant","error_description":"expired access/refresh token"}`, `INVALID_SESSION_ID`, "Salesforce refresh token rotation", "Salesforce access token expires_in missing".
+### Symptoms
+
+The token endpoint, for a refresh token that is no longer valid (Salesforce's own example):
+
+```json
+{"error": "invalid_grant", "error_description": "expired access/refresh token"}
+```
+
+The REST API, for an access token that is no longer valid (HTTP 401):
+
+```json
+[{"message": "Session expired or invalid", "errorCode": "INVALID_SESSION_ID"}]
+```
 
 ## The 401-driven refresh
 
@@ -20,7 +32,7 @@ $refresher = new LeagueRefresher($this->provider());
 $token = $pending->token($refresher);
 $response = $this->send($token, $soql);
 
-if ($response->status() === 401) {
+if ($response->status() === 401 && $response->json('0.errorCode') === 'INVALID_SESSION_ID') {
     // Refresh only if the stored token is still the one Salesforce rejected.
     $token = $pending->rejected($token->accessToken)->token($refresher);
     $response = $this->send($token, $soql);
@@ -66,4 +78,4 @@ It replaces the stored access token with one Salesforce will reject, as after a 
 - One stored token per org, under `salesforce:{orgId}`.
 - When Salesforce rejects the refresh token, `/salesforce/organisation` sends the user back to connect; when the refresh fails temporarily it answers 503; when the query fails it answers 502.
 
-See also: [providers.md#salesforce](../../docs/providers.md#salesforce) · [README: when the provider rejects the access token](../../README.md#when-the-provider-rejects-the-access-token)
+See also: [provider notes](../../docs/providers.md#salesforce) · [how it works](../../docs/how-it-works.md) · [README: when the provider rejects the access token](../../README.md#when-the-provider-rejects-the-access-token)

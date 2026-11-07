@@ -4,7 +4,7 @@
 
 > **Work in progress.** Not released yet. The API below may change before v0.1.0.
 
-Prevents the OAuth2 refresh token race condition in Laravel: when several queue workers refresh the same token at once, providers with refresh token rotation answer the losers with `invalid_grant`, and some revoke the connection. One refresh per expiry; every worker gets the token it produced.
+Prevents the OAuth2 refresh token race condition in Laravel: when several queue workers refresh the same token at once, providers that retire the old refresh token at once answer the losers with `invalid_grant`, and some revoke the connection. One refresh per expiry; the other workers wait and use the token it stored.
 
 Works with any [league/oauth2-client](https://oauth2-client.thephpleague.com/) provider or any SDK, on Laravel 10, 11, 12 and 13, with queue workers, Laravel Horizon, scheduled commands and web requests. Examples for [QuickBooks Online](examples/quickbooks), [Xero](examples/xero), [Salesforce](examples/salesforce), [Microsoft Graph](examples/microsoft) and [Google](examples/google).
 
@@ -16,7 +16,9 @@ Providers that rotate refresh tokens issue a new refresh token on every refresh 
 {"error": "invalid_grant", "error_description": "..."}
 ```
 
-Apps often treat that as "the user disconnected", so someone has to reconnect by hand. With QuickBooks Online and Salesforce the duplicate refresh itself can revoke the tokens. Xero hides it with a 30-minute grace period. See [docs/providers.md](docs/providers.md).
+What the description says depends on the provider, for example Salesforce's `expired access/refresh token`, Microsoft's `AADSTS70008` or Google's "the token may have expired or has been invalidated".
+
+Apps often treat that as "the user disconnected", so someone has to reconnect by hand. With QuickBooks Online and Salesforce the duplicate refresh itself can revoke the tokens: Salesforce runs refresh token reuse detection and revokes the current tokens when a retired one is sent again. Xero hides the race with a 30-minute grace period. See [docs/providers.md](docs/providers.md).
 
 This package makes the refresh safe under concurrency:
 
@@ -41,11 +43,11 @@ Tested on SQLite, MySQL and PostgreSQL.
 
 ### Laravel 10 and 11
 
-Laravel 10 and 11 no longer get security fixes. Every release of both has open security advisories, including a critical one: [CVE-2026-114509](https://github.com/laravel/framework/security/advisories/GHSA-f9x3-7vq9-cph6), an authentication bypass in `TokenGuard`. This package does not use the affected features, but your application runs on that framework. Supporting it here does not make it safe. Plan the upgrade to Laravel 12 or 13.
+Laravel 10 and 11 no longer get security fixes. Every release of both has open security advisories, including a critical one (as of 7 November 2026): [CVE-2026-114509](https://github.com/laravel/framework/security/advisories/GHSA-f9x3-7vq9-cph6), an authentication bypass in `TokenGuard`. This package does not use the affected features, but your application runs on that framework. Supporting it here does not make it safe. Plan the upgrade to Laravel 12 or 13.
 
 Support for 10 and 11 is best-effort: they are tested in CI and bugs are fixed, but support may be dropped in a later 0.x release, announced in the changelog one release ahead. See [docs/support-policy.md](docs/support-policy.md).
 
-About installing: Composer 2.9 and later refuse to install package versions with security advisories by default. What we observed with Composer 2.10.1, in a Laravel 10.50.4 app and a Laravel 11.57.1 app whose `composer.lock` already existed and with that blocking on: `composer require` for this package installed it (with a warning listing the framework's advisories), while `composer update laravel/framework` was refused. Your result can differ with another Composer version or without a lock file. This package does not change or ship any advisory configuration.
+Installing into an existing Laravel 10 or 11 app with Composer 2.9+ (which blocks packages with security advisories by default): see [docs/support-policy.md](docs/support-policy.md#installing-on-laravel-10-and-11).
 
 ## Installation
 
@@ -178,6 +180,9 @@ Usually two processes refreshed the same token at the same moment, and the provi
 **Isn't Laravel's `WithoutOverlapping` job middleware enough?**
 It serialises jobs that share a key, but it does not cover web requests, commands or other job classes that use the same token, it holds the key for the whole job rather than the refresh, and it does not re-read the token or protect the write. This package locks only around the refresh, wherever it happens.
 
+**What does "refresh token already used" or "invalid refresh token" mean?**
+That the refresh token you sent was already exchanged for a new one (rotation) or has been revoked. Providers word it differently, and most answer with the standard `invalid_grant`. If it happens when several processes run at once, it is the race this package prevents.
+
 **Which cache store do I need?**
 One that supports atomic locks and is shared by every server that runs workers: Redis, Memcached, DynamoDB or the database store. `file` and `array` locks only work on one server. A store without locks, such as `null`, is refused with `LockStoreNotSupported`.
 
@@ -199,7 +204,7 @@ Yes. The grace period hides duplicate refreshes, but each one still issues anoth
 ## Limits
 
 - The lock serialises refreshes within one application that shares one cache store. Two different applications using the same OAuth connection are not coordinated.
-- The lock is a lease. Keep the refresh call's HTTP timeout well below `lock_seconds`; if a refresh outlives the lease, another worker can send the retired refresh token. The package then keeps the newest token it received, but providers that punish reuse may already have revoked the connection, and that worker's caller has seen `TokenRevoked`. See [How it works](docs/how-it-works.md#a-refresh-that-outlives-the-lock).
+- The lock is a lease. Keep the refresh call's HTTP timeout well below `lock_seconds`; if a refresh outlives the lease, another worker can refresh too. The compare-and-swap keeps the first result stored; if the other worker recorded a revocation of exactly the generation the slow worker rotated, the slow worker stores its tokens instead. Providers that punish reuse may already have revoked the connection, and the other worker's caller may have seen `TokenRevoked`. See [How it works](docs/how-it-works.md#a-refresh-that-outlives-the-lock).
 - `file` and `array` cache locks only work within one server.
 
 ## Status

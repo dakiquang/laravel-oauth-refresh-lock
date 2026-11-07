@@ -4,13 +4,21 @@ A Laravel example for the Microsoft identity platform (Entra ID, v2.0 endpoints)
 
 > **Written from Microsoft's documentation and checked to boot in a Laravel 12 app; not yet run against a real tenant.** If something differs, please open an issue.
 
+> **Got here from `AADSTS70008`?** It means the refresh token expired from inactivity or was revoked. Microsoft does not revoke the old refresh token when it is used, so this error is not caused by two workers refreshing at once, and this package cannot prevent it. The default classifier reports it as `TokenRevoked`, so you can ask the user to sign in again.
+
 ## What Microsoft does with refresh tokens
 
 - Refresh tokens replace themselves with a new one on every use, but the old one is **not revoked** when used; the client should discard it ([Microsoft: refresh tokens](https://learn.microsoft.com/en-us/entra/identity-platform/refresh-tokens)). A duplicate refresh costs an extra call, not the connection.
 - Refresh tokens last 90 days by default (24 hours for single-page apps); access tokens 60–90 minutes.
 - An expired or revoked refresh token returns `invalid_grant`, with codes such as `AADSTS70008` (ExpiredOrRevokedGrant: "The refresh token has expired due to inactivity"), `AADSTS700082` and `AADSTS50173` ([Microsoft: error codes](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes)). The default classifier marks the token revoked on `invalid_grant`.
 
-Typical searches: "AADSTS70008 refresh token", "microsoft graph refresh token php", "laravel microsoft graph refresh token".
+### Symptoms
+
+`invalid_grant` from `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token`, with a description that starts with an `AADSTS` code, for example:
+
+```text
+AADSTS70008: ExpiredOrRevokedGrant - The refresh token has expired due to inactivity.
+```
 
 ## The Microsoft-specific parts
 
@@ -39,4 +47,4 @@ OAuthRefreshLock::for($key)->accessToken(new LeagueRefresher($provider, ['scope'
 3. `php artisan serve`, open `http://localhost:8000/microsoft/connect`, then `/microsoft/me`.
 4. `php artisan microsoft:race <userObjectId> --workers=6`: expect one refresh.
 
-See also: [providers.md#microsoft-identity-platform](../../docs/providers.md#microsoft-identity-platform)
+See also: [provider notes](../../docs/providers.md#microsoft-identity-platform) · [how it works](../../docs/how-it-works.md) · [README: when the provider rejects the access token](../../README.md#when-the-provider-rejects-the-access-token)

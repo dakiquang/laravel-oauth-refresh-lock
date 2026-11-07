@@ -1,6 +1,6 @@
 # Provider notes: refresh token rotation and `invalid_grant` in QuickBooks, Salesforce, Xero, Microsoft Graph and Google
 
-How each provider handles refresh tokens, from its own documentation (checked 07/11/2026), what the error looks like when two workers refresh at once, a Laravel code example, and what was tested. Providers change these rules; follow the links before relying on them. Where the documentation does not say, this page says so instead of guessing.
+How each provider handles refresh tokens, from its own documentation (checked 7 November 2026), what the error looks like when two workers refresh at once, a Laravel code example, and what was tested. Providers change these rules; follow the links before relying on them. Where the documentation does not say, this page says so instead of guessing.
 
 ## Summary
 
@@ -12,7 +12,7 @@ How each provider handles refresh tokens, from its own documentation (checked 07
 | [Microsoft identity platform](#microsoft-identity-platform) | every time | not revoked when used | an extra call | [examples/microsoft](../examples/microsoft) |
 | [Google](#google) | no | stays valid | an extra call | [examples/google](../examples/google) |
 
-The package also saves duplicate provider calls when the risk is low, but the reason it exists is the first two rows.
+The package also saves duplicate provider calls when the risk is low, but the reason it exists is the first two rows. How the lock, the re-read and the compare-and-swap work together: [how-it-works.md](how-it-works.md).
 
 ## Intuit QuickBooks Online
 
@@ -49,13 +49,13 @@ Full example, including a callback that checks the `realmId` against the new tok
 
 ### What was tested
 
-A real QuickBooks Online sandbox company (07/11/2026): six processes with an expired token at the same moment, three rounds, one refresh per round, no `invalid_grant`.
+A real QuickBooks Online sandbox company (7 November 2026): six processes with an expired token at the same moment, three rounds, one refresh per round, no `invalid_grant`. No run without the lock: it could revoke the sandbox connection; that risk comes from Intuit's FAQ, not from our test.
 
 ## Salesforce
 
 ### Rotation behaviour
 
-- With Refresh Token Rotation on, every refresh returns a new refresh token and the previous one is invalidated at once. It is on by default, and cannot be turned off, for new External Client Apps since 22/10/2026.
+- With Refresh Token Rotation on, every refresh returns a new refresh token and the previous one is invalidated at once. It is on by default, and cannot be turned off, for new External Client Apps since 22 October 2026.
 - Reusing an invalidated refresh token revokes the current refresh token and its access tokens, so the client must authenticate again.
 - **No `expires_in`.** The token response has `access_token`, `refresh_token`, `instance_url`, `id`, `token_type`, `issued_at`, `signature` and `scope`; the session timeout is set in Salesforce. Store the token without an expiry and refresh when an API call answers 401, with `rejected()`.
 - Sources: [Refresh Token Rotation](https://help.salesforce.com/s/articleView?id=005316711&type=1), [External Client App defaults](https://help.salesforce.com/s/articleView?id=005390912&type=1), [Web Server Flow](https://help.salesforce.com/s/articleView?id=sf.remoteaccess_oauth_web_server_flow.htm&type=5), [REST API status codes](https://developer.salesforce.com/docs/platform/api-rest/guide/errorcodes.html).
@@ -79,7 +79,7 @@ $refresher = new LeagueRefresher($provider);
 $token = $pending->token($refresher);
 $response = Http::withToken($token->accessToken)->get($token->meta['instance_url'].'/services/data/v60.0/query', ['q' => $soql]);
 
-if ($response->status() === 401) {
+if ($response->status() === 401 && $response->json('0.errorCode') === 'INVALID_SESSION_ID') {
     // Refresh only if the stored token is still the one Salesforce rejected.
     $token = $pending->rejected($token->accessToken)->token($refresher);
     $response = Http::withToken($token->accessToken)->get($token->meta['instance_url'].'/services/data/v60.0/query', ['q' => $soql]);
@@ -90,7 +90,7 @@ Full example, with the org ID taken from the token response and `instance_url` k
 
 ### What was tested
 
-Not yet against a real org. Against a local stand-in that mirrors the documented behaviour (no `expires_in`, rotation, reuse revokes, 401 `INVALID_SESSION_ID`): six processes, three rounds, every API call answered 401, one refresh per round, no refresh token reused. The package's concurrency test also runs eight forked workers that report the same rejected token, with database and Redis locks.
+Not yet against a real org. Against a local stand-in that mirrors the documented behaviour (no `expires_in`, rotation, reuse revokes, 401 `INVALID_SESSION_ID`): six processes, three rounds, all 18 API calls answered 401, one refresh per round, no refresh token reused. The package's concurrency test also runs eight forked workers that report the same rejected token, with database and Redis locks.
 
 ## Xero
 
@@ -104,7 +104,7 @@ Not yet against a real org. Against a local stand-in that mirrors the documented
 
 ### Error response
 
-`invalid_grant` from `https://identity.xero.com/connect/token`. Within the grace period, a duplicate refresh does not fail at all, which is why the race goes unnoticed with Xero.
+Within the grace period, a duplicate refresh does not fail at all, which is why the race goes unnoticed with Xero. Xero's documentation does not name the error for a refresh token used after the grace period; OAuth 2.0 (RFC 6749, section 5.2) defines `invalid_grant` for a refresh token that is invalid, expired or revoked, and that is what the default classifier treats as revoked.
 
 ### Example
 
@@ -129,7 +129,7 @@ Full example, with the tenant from the connections endpoint: [examples/xero](../
 
 ### What was tested
 
-A real Xero demo organisation (07/11/2026): with the package, six processes, several rounds, one refresh per round. Control run without any lock: six processes refreshed at the same moment with the same refresh token, all six succeeded, and Xero issued a different new refresh token to each. Not measured: whether those sibling tokens stay valid after 30 minutes.
+A real Xero demo organisation (7 November 2026): with the package, six processes, several rounds, one refresh per round. Control run without any lock: six processes refreshed at the same moment with the same refresh token, all six succeeded, and Xero issued a different new refresh token to each. Not measured: whether those sibling tokens stay valid after 30 minutes.
 
 ## Microsoft identity platform
 
