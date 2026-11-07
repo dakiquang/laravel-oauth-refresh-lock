@@ -4,13 +4,26 @@
 
 > **Work in progress.** Not released yet. The API below may change before v0.1.0.
 
-Some OAuth2 providers rotate refresh tokens: every refresh returns a new refresh token and retires the old one. When two queue workers or requests notice an expired access token at the same time, both try to refresh. One wins; the other sends a refresh token that was just retired, gets `invalid_grant`, and the app often treats that as "the user disconnected". Someone then has to reconnect by hand.
+Prevents the OAuth2 refresh token race condition in Laravel: when several queue workers refresh the same token at once, providers with refresh token rotation answer the losers with `invalid_grant`, and some revoke the connection. One refresh per expiry; every worker gets the token it produced.
 
-This package makes refresh safe under concurrency:
+Works with any [league/oauth2-client](https://oauth2-client.thephpleague.com/) provider or any SDK, on Laravel 10, 11, 12 and 13, with queue workers, Laravel Horizon, scheduled commands and web requests. Examples for [QuickBooks Online](examples/quickbooks), [Xero](examples/xero), [Salesforce](examples/salesforce), [Microsoft Graph](examples/microsoft) and [Google](examples/google).
+
+## The problem: `invalid_grant` when two workers refresh at once
+
+Providers that rotate refresh tokens issue a new refresh token on every refresh and retire the old one. Two workers notice the same expired access token and both send the same refresh token. The first wins. The second sends a refresh token that was just retired and gets:
+
+```json
+{"error": "invalid_grant", "error_description": "..."}
+```
+
+Apps often treat that as "the user disconnected", so someone has to reconnect by hand. With QuickBooks Online and Salesforce the duplicate refresh itself can revoke the tokens. Xero hides it with a 30-minute grace period. See [docs/providers.md](docs/providers.md).
+
+This package makes the refresh safe under concurrency:
 
 - No lock while the access token is still fresh.
-- One lock per token when it is about to expire.
+- One atomic cache lock (`Cache::lock`) per token when it is about to expire, or when an API call answered 401.
 - The token is read again inside the lock, so a worker that waited uses the token the winner just stored.
+- The write is a compare-and-swap on a version, so a reconnect in the meantime is never overwritten.
 - Only a definite `invalid_grant` marks the token revoked. Timeouts, network errors and 5xx responses keep the token so the next attempt can succeed.
 
 ## Requirements
@@ -143,9 +156,45 @@ Stack traces are another matter: with `zend.exception_ignore_args` off (the `php
 
 See [docs/how-it-works.md](docs/how-it-works.md): the lock, the re-read, compare-and-swap writes, what happens when a refresh outlives its lock, and how errors are classified.
 
-## Providers
+## Providers and examples
 
-Rotation rules differ a lot between providers: for some, a duplicate refresh can lock the user out; for others it is harmless. See [docs/providers.md](docs/providers.md), with links to each provider's documentation.
+Rotation rules differ a lot between providers: for some, a duplicate refresh can lock the user out; for others it is harmless. Each provider has a runnable Laravel example (connect, call the API, and a `race` command that starts several processes at once and checks there was exactly one refresh).
+
+| Provider | Rotates refresh tokens | A duplicate refresh | Example | Tested against |
+|---|---|---|---|---|
+| QuickBooks Online (Intuit) | the value changes every 24 hours | `invalid_grant`; Intuit may revoke the tokens | [examples/quickbooks](examples/quickbooks) | real sandbox company |
+| Salesforce | every refresh (Refresh Token Rotation) | reuse revokes the current tokens too | [examples/salesforce](examples/salesforce) | local stand-in (real org pending) |
+| Xero | every refresh | succeeds within the 30-minute grace period | [examples/xero](examples/xero) | real demo organisation |
+| Microsoft identity platform (Graph) | every refresh, old one not revoked | an extra call | [examples/microsoft](examples/microsoft) | boot check only |
+| Google | no | an extra call | [examples/google](examples/google) | boot check only |
+
+Details, error strings (`invalid_grant`, `expired access/refresh token`, `INVALID_SESSION_ID`, `AADSTS70008`) and sources: [docs/providers.md](docs/providers.md).
+
+## FAQ
+
+**Why do I get `invalid_grant` randomly when refreshing an OAuth token?**
+Usually two processes refreshed the same token at the same moment, and the provider rotated the refresh token. The one that lost sent a refresh token that was already retired. It shows up under load: queue workers, Horizon, scheduled commands overlapping with web requests. A real revocation (the user disconnected the app, an expired refresh token) gives the same error, which is why the package stores the token as revoked only on `invalid_grant` and reads it again under the lock first.
+
+**Isn't Laravel's `WithoutOverlapping` job middleware enough?**
+It serialises jobs that share a key, but it does not cover web requests, commands or other job classes that use the same token, it holds the key for the whole job rather than the refresh, and it does not re-read the token or protect the write. This package locks only around the refresh, wherever it happens.
+
+**Which cache store do I need?**
+One that supports atomic locks and is shared by every server that runs workers: Redis, Memcached, DynamoDB or the database store. `file` and `array` locks only work on one server. A store without locks, such as `null`, is refused with `LockStoreNotSupported`.
+
+**My provider does not return `expires_in` (Salesforce). How does it know when to refresh?**
+Store the token without an expiry and report a 401 with `rejected($accessToken)`; see [When the provider rejects the access token](#when-the-provider-rejects-the-access-token).
+
+**Does it work with Xero's 30-minute grace period?**
+Yes. The grace period hides duplicate refreshes, but each one still issues another refresh token; the lock keeps it to one. See [examples/xero](examples/xero).
+
+**Are tokens stored encrypted?**
+`EloquentTokenStore` encrypts the access and refresh tokens with the application key. Events and the package's exception messages never contain token values.
+
+## Testing
+
+- CI runs PHP 8.1–8.5 with Laravel 10–13, PHPStan at max level, and the store tests on SQLite, MySQL and PostgreSQL.
+- A concurrency test forks eight PHP processes that ask for the same expiring (or rejected) token at the same moment, three rounds per run, with the database lock and the Redis lock. A control run without the lock must show more than one refresh.
+- The QuickBooks Online and Xero examples were run against real sandbox accounts; see each example's README.
 
 ## Limits
 

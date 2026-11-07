@@ -1,4 +1,4 @@
-# QuickBooks Online example
+# QuickBooks Online OAuth 2.0 refresh token in Laravel: avoid `invalid_grant` and revoked tokens
 
 A connect / call / disconnect flow for QuickBooks Online, plus a command that shows several workers refreshing one token at the same time.
 

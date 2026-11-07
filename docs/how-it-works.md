@@ -1,8 +1,16 @@
-# How it works
+# How it works: preventing concurrent OAuth token refreshes in Laravel
 
-## The race
+## The refresh token race, step by step
 
-With rotating refresh tokens, every refresh returns a new refresh token and the provider retires the old one (some immediately, some after a grace period, see [providers.md](providers.md)). Two workers that notice the same expired access token both send the same refresh token. The first wins. The second sends a retired token and gets `invalid_grant`. If the app takes that as "disconnected", a user has to reconnect for no reason. With some providers the reuse itself revokes the connection.
+With refresh token rotation, every refresh returns a new refresh token and the provider retires the old one (some immediately, some after a grace period, see [providers.md](providers.md)). Some providers also run refresh token reuse detection: a retired refresh token sent again is treated as a possible leak, and the whole token family is revoked.
+
+1. Worker A and worker B both read the token: the access token expires in a few seconds.
+2. Both call the token endpoint with the same refresh token.
+3. A's call arrives first: the provider issues a new access token and a new refresh token, and retires the old refresh token.
+4. B's call arrives with the retired refresh token: `invalid_grant`. With reuse detection, A's new tokens are revoked too.
+5. If the app treats `invalid_grant` as "the user disconnected", someone has to reconnect by hand.
+
+The fix is a single-flight refresh: per token, one worker refreshes and the others wait for its result.
 
 ## One refresh per expiry
 
@@ -39,9 +47,17 @@ sequenceDiagram
 
 Writes from the app (connect, reconnect) are unconditional, and the store decides their version: an existing key moves to version + 1, a new key starts from a time-based value. So a worker holding an old read can never win a compare-and-swap against a newer connection, even one made after the key was forgotten.
 
+## Distributed lock or conditional write?
+
+A common answer to this race is "use a conditional write, not a distributed lock". The package uses both, because each closes a different gap:
+
+- **The lock** (one `Cache::lock` per token key) stops the second refresh from being sent at all. A conditional write alone lets both workers call the provider; the loser's write is rejected, but its refresh call may already have retired the winner's token or triggered reuse detection.
+- **The compare-and-swap write** protects the store when the lock is not enough: a reconnect while a refresh is running, or a refresh that outlives its lease. Without it, a slow worker could overwrite a newer token with an older one.
+- **The re-read inside the lock** is what makes waiting useful: the worker that waited finds the token the first worker stored and returns it.
+
 ## A refresh that outlives the lock
 
-The lock is a lease of `lock_seconds`. If the provider call takes longer:
+The lock is a lease of `lock_seconds` (lease expiry is the one way two refreshes can still overlap). If the provider call takes longer:
 
 1. Worker A is still waiting for the provider; its lease has expired.
 2. Worker B takes the lock, reads the token, sends the same refresh token. If A's refresh already went through, the provider answers `invalid_grant`, and B stores the token as revoked and throws `TokenRevoked` (and dispatches `TokenRevokedByProvider`).

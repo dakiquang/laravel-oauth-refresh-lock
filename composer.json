@@ -1,15 +1,22 @@
 {
     "name": "dakiquang/laravel-oauth-refresh-lock",
-    "description": "Refresh rotating OAuth2 tokens in Laravel without racing: one refresh per expiry, every worker gets the new token.",
+    "description": "Prevent the OAuth2 refresh token race condition in Laravel: one refresh per expiry across queue workers, no invalid_grant from rotating refresh tokens.",
     "keywords": [
         "laravel",
         "oauth2",
+        "oauth",
         "refresh-token",
-        "token-rotation",
+        "token-refresh",
         "race-condition",
+        "invalid-grant",
         "cache-lock",
+        "atomic-lock",
+        "token-rotation",
+        "queue",
         "xero",
-        "quickbooks"
+        "quickbooks",
+        "salesforce",
+        "league-oauth2-client"
     ],
     "homepage": "https://github.com/dakiquang/laravel-oauth-refresh-lock",
     "license": "MIT",
