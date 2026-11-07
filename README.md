@@ -1,6 +1,10 @@
 # Laravel OAuth Refresh Lock
 
 [![ci](https://github.com/dakiquang/laravel-oauth-refresh-lock/actions/workflows/ci.yml/badge.svg)](https://github.com/dakiquang/laravel-oauth-refresh-lock/actions/workflows/ci.yml)
+[![Latest version](https://img.shields.io/packagist/v/dakiquang/laravel-oauth-refresh-lock.svg)](https://packagist.org/packages/dakiquang/laravel-oauth-refresh-lock)
+[![PHP version](https://img.shields.io/packagist/dependency-v/dakiquang/laravel-oauth-refresh-lock/php.svg)](https://packagist.org/packages/dakiquang/laravel-oauth-refresh-lock)
+[![Total downloads](https://img.shields.io/packagist/dt/dakiquang/laravel-oauth-refresh-lock.svg)](https://packagist.org/packages/dakiquang/laravel-oauth-refresh-lock/stats)
+[![License](https://img.shields.io/packagist/l/dakiquang/laravel-oauth-refresh-lock.svg)](LICENSE)
 
 > **Early release (0.x).** The API may still change before 1.0; changes are listed in the [changelog](CHANGELOG.md).
 
