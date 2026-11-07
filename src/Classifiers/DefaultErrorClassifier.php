@@ -11,6 +11,7 @@ use Illuminate\Http\Client\ConnectionException as LaravelConnectionException;
 use Illuminate\Http\Client\RequestException as LaravelRequestException;
 use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use Psr\Http\Client\NetworkExceptionInterface;
+use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
 /**
@@ -20,7 +21,8 @@ use Throwable;
  *
  * Order matters:
  * 1. Network errors and HTTP 408, 429, 5xx are transient, whatever the body
- *    says — a gateway or a struggling provider can return odd bodies.
+ *    says — a gateway or a struggling provider can return odd bodies. So are
+ *    the OAuth codes in $transientErrors, for SDKs that drop the HTTP status.
  * 2. Only an OAuth `error` code listed in $revokedErrors revokes the token.
  * 3. Everything else is unexpected and keeps the token, because wrongly
  *    revoking forces the user to reconnect.
@@ -29,9 +31,11 @@ final class DefaultErrorClassifier implements ErrorClassifier
 {
     /**
      * @param  list<string>  $revokedErrors  OAuth2 `error` codes that mean the refresh token is dead (RFC 6749 §5.2).
+     * @param  list<string>  $transientErrors  OAuth2 `error` codes that mean "try again later" (RFC 6749 §4.1.2.1).
      */
     public function __construct(
         private readonly array $revokedErrors = ['invalid_grant'],
+        private readonly array $transientErrors = ['temporarily_unavailable', 'server_error'],
     ) {}
 
     public function classify(Throwable $error): Classification
@@ -44,6 +48,10 @@ final class DefaultErrorClassifier implements ErrorClassifier
 
         if ($status !== null && ($status === 408 || $status === 429 || $status >= 500)) {
             return Classification::transient("http_{$status}");
+        }
+
+        if ($oauthError !== null && in_array($oauthError, $this->transientErrors, true)) {
+            return Classification::transient($oauthError);
         }
 
         if ($oauthError !== null && in_array($oauthError, $this->revokedErrors, true)) {
@@ -71,9 +79,18 @@ final class DefaultErrorClassifier implements ErrorClassifier
     private function response(Throwable $error): array
     {
         if ($error instanceof IdentityProviderException) {
-            $status = $error->getCode() >= 100 ? $error->getCode() : null;
+            $body = $error->getResponseBody();
 
-            return [$status, $this->errorCode($error->getResponseBody()) ?? $this->errorCode($error->getMessage())];
+            // Some providers attach the PSR-7 response itself, which carries the real status.
+            if ($body instanceof ResponseInterface) {
+                return [$body->getStatusCode(), $this->errorCode((string) $body->getBody()) ?? $this->errorCode($error->getMessage())];
+            }
+
+            // Otherwise the exception code is all there is. GenericProvider fills it from a
+            // field of the response body (0 when absent), so it is a status only when it looks like one.
+            $status = $error->getCode() >= 100 && $error->getCode() <= 599 ? $error->getCode() : null;
+
+            return [$status, $this->errorCode($body) ?? $this->errorCode($error->getMessage())];
         }
 
         if ($error instanceof LaravelRequestException) {

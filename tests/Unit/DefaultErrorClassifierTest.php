@@ -30,6 +30,26 @@ class DefaultErrorClassifierTest extends TestCase
         $request = new Request('POST', 'https://identity.example.test/connect/token');
         $json = fn (int $status, array $body): Response => new Response($status, ['Content-Type' => 'application/json'], (string) json_encode($body));
 
+        yield 'league response object, invalid_grant' => [
+            new IdentityProviderException('Bad Request', 400, $json(400, ['error' => 'invalid_grant'])),
+            RefreshFailure::Revoked, 'invalid_grant',
+        ];
+        yield 'league response object, 503 wins over the body' => [
+            new IdentityProviderException('invalid_grant', 0, $json(503, ['error' => 'invalid_grant'])),
+            RefreshFailure::Transient, 'http_503',
+        ];
+        yield 'league temporarily_unavailable without status' => [
+            new IdentityProviderException('temporarily_unavailable', 0, ['error' => 'temporarily_unavailable']),
+            RefreshFailure::Transient, 'temporarily_unavailable',
+        ];
+        yield 'league server_error without status' => [
+            new IdentityProviderException('server_error', 0, ['error' => 'server_error']),
+            RefreshFailure::Transient, 'server_error',
+        ];
+        yield 'league body code that is not an HTTP status' => [
+            new IdentityProviderException('invalid_grant', 70001, ['error' => 'invalid_grant', 'code' => 70001]),
+            RefreshFailure::Revoked, 'invalid_grant',
+        ];
         yield 'league invalid_grant' => [
             new IdentityProviderException('invalid_grant', 400, ['error' => 'invalid_grant']),
             RefreshFailure::Revoked, 'invalid_grant',
