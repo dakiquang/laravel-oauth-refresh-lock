@@ -6,18 +6,22 @@ namespace Dakiquang\OAuthRefreshLock\Refreshers;
 
 use Carbon\CarbonImmutable;
 use Dakiquang\OAuthRefreshLock\Contracts\Refresher;
-use Dakiquang\OAuthRefreshLock\Exceptions\UnreadableTokenResponse;
 use Dakiquang\OAuthRefreshLock\RefreshedToken;
 use Dakiquang\OAuthRefreshLock\StoredToken;
 use League\OAuth2\Client\Provider\AbstractProvider;
 use League\OAuth2\Client\Token\AccessTokenInterface;
 use LogicException;
-use UnexpectedValueException;
 
 /**
  * Refreshes through any league/oauth2-client provider with the
  * `refresh_token` grant. Errors are left to the ErrorClassifier: the default
  * one reads the provider's IdentityProviderException and Guzzle's exceptions.
+ *
+ * league/oauth2-client does not keep the HTTP status when the token endpoint
+ * answers with something that is not JSON (an error page) and throws an
+ * UnexpectedValueException. Without the status there is no telling an outage
+ * from a misconfigured URL, so that error stays unexpected: the token is kept
+ * and the error reaches the caller.
  */
 final class LeagueRefresher implements Refresher
 {
@@ -36,13 +40,7 @@ final class LeagueRefresher implements Refresher
             throw new LogicException('No refresh token is stored for this token; the user has to connect again.');
         }
 
-        try {
-            $new = $this->provider->getAccessToken('refresh_token', [...$this->options, 'refresh_token' => $token->refreshToken]);
-        } catch (UnexpectedValueException $error) {
-            // league/oauth2-client reports a non-JSON body (a gateway's 502/503 page)
-            // this way and does not keep the HTTP status.
-            throw new UnreadableTokenResponse($error);
-        }
+        $new = $this->provider->getAccessToken('refresh_token', [...$this->options, 'refresh_token' => $token->refreshToken]);
 
         return new RefreshedToken(
             accessToken: $new->getToken(),

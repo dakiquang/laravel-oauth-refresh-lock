@@ -25,6 +25,7 @@ use LogicException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\RequestInterface;
+use UnexpectedValueException;
 
 class LeagueRefresherTest extends TestCase
 {
@@ -115,32 +116,49 @@ class LeagueRefresherTest extends TestCase
         $this->assertTrue($this->store->get(self::KEY)?->isRevoked());
     }
 
-    /**
-     * @return iterable<string, array{Response, string}>
-     */
-    public static function outages(): iterable
+    public function test_a_json_temporarily_unavailable_answer_keeps_the_token(): void
     {
-        yield 'gateway HTML page' => [new Response(502, ['Content-Type' => 'text/html'], '<html><body>Bad Gateway</body></html>'), 'unreadable_response'];
-        yield 'plain text 503' => [new Response(503, [], 'Service Unavailable'), 'unreadable_response'];
-        yield 'empty 500' => [new Response(500), 'unreadable_response'];
+        $this->seed();
+        // GenericProvider drops the HTTP status; the OAuth error code still says "later".
+        $this->http->append($this->json(503, ['error' => 'temporarily_unavailable']));
+
+        try {
+            $this->coordinator()->for(self::KEY)->token($this->refresher());
+            $this->fail('TransientRefreshFailure was not thrown');
+        } catch (TransientRefreshFailure $failure) {
+            $this->assertSame('temporarily_unavailable', $failure->errorCode);
+        }
+
+        $this->assertTokenKept();
     }
 
-    #[DataProvider('outages')]
-    public function test_a_provider_outage_keeps_the_token(Response $response, string $code): void
+    /**
+     * @return iterable<string, array{Response}>
+     */
+    public static function unreadableAnswers(): iterable
+    {
+        yield 'gateway HTML page' => [new Response(502, ['Content-Type' => 'text/html'], '<html><body>Bad Gateway</body></html>')];
+        yield 'plain text 503' => [new Response(503, [], 'Service Unavailable')];
+        yield 'HTML 404 from a wrong token URL' => [new Response(404, ['Content-Type' => 'text/html'], '<html><body>Not Found</body></html>')];
+    }
+
+    /**
+     * league/oauth2-client loses the HTTP status of a non-JSON answer, so an
+     * outage cannot be told from a misconfiguration: the error reaches the
+     * caller as is and the token is kept.
+     */
+    #[DataProvider('unreadableAnswers')]
+    public function test_an_unreadable_answer_reaches_the_caller_and_keeps_the_token(Response $response): void
     {
         $this->seed();
         $this->http->append($response);
 
         try {
             $this->coordinator()->for(self::KEY)->token($this->refresher());
-            $this->fail('TransientRefreshFailure was not thrown');
-        } catch (TransientRefreshFailure $failure) {
-            $this->assertSame($code, $failure->errorCode);
+            $this->fail('UnexpectedValueException was not thrown');
+        } catch (UnexpectedValueException) {
+            $this->assertTokenKept();
         }
-
-        $stored = $this->store->get(self::KEY);
-        $this->assertFalse($stored?->isRevoked());
-        $this->assertSame('refresh-old', $stored?->refreshToken);
     }
 
     public function test_a_token_without_refresh_token_fails_without_calling_the_provider(): void
@@ -152,6 +170,14 @@ class LeagueRefresherTest extends TestCase
         } finally {
             $this->assertSame([], $this->sent);
         }
+    }
+
+    private function assertTokenKept(): void
+    {
+        $stored = $this->store->get(self::KEY);
+        $this->assertFalse($stored?->isRevoked());
+        $this->assertSame('refresh-old', $stored?->refreshToken);
+        $this->assertSame('access-old', $stored?->accessToken);
     }
 
     /**
