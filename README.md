@@ -16,7 +16,7 @@ This package makes refresh safe under concurrency:
 ## Requirements
 
 - PHP 8.2 or later
-- Laravel 11, 12 or 13
+- Laravel 12 or 13
 - A cache store that supports atomic locks (Redis, Memcached, DynamoDB or database for multi-server setups)
 
 ## Status
