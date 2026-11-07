@@ -39,7 +39,11 @@ class QuickBooksController extends Controller
 
         $realmId = (string) $request->query('realmId');
         $token = $this->quickBooks->provider()->getAccessToken('authorization_code', ['code' => (string) $request->query('code')]);
-        abort_unless($this->quickBooks->tokenBelongsTo($realmId, $token), 400, 'The company does not match the authorisation.');
+        try {
+            abort_unless($this->quickBooks->tokenBelongsTo($realmId, $token), 400, 'The company does not match the authorisation.');
+        } catch (ConnectionException|RequestException) {
+            abort(502, 'QuickBooks did not answer; connect again in a moment.');
+        }
         $this->quickBooks->connect($realmId, $token);
         $request->session()->put('quickbooks_realm', $realmId);
 

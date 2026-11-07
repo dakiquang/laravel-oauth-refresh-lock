@@ -73,12 +73,23 @@ final class QuickBooks
 
     /**
      * The realm ID in the callback URL comes from the browser. A token only
-     * works for the company it was issued for, so ask that company's API.
+     * works for the company it was issued for, so ask that company's API:
+     * 401/403 means another company; other failures are thrown, so a QuickBooks
+     * outage is not mistaken for a mismatch.
      */
     public function tokenBelongsTo(string $realmId, AccessTokenInterface $token): bool
     {
-        return preg_match('/^\d+$/', $realmId) === 1
-            && $this->companyInfoRequest($realmId, $token->getToken())->successful();
+        if (preg_match('/^\d+$/', $realmId) !== 1) {
+            return false;
+        }
+
+        $response = $this->companyInfoRequest($realmId, $token->getToken());
+        if (in_array($response->status(), [401, 403], true)) {
+            return false;
+        }
+        $response->throw();
+
+        return true;
     }
 
     private function companyInfoRequest(string $realmId, string $accessToken): Response
