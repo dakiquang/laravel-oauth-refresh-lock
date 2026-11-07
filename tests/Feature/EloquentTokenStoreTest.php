@@ -17,6 +17,8 @@ class EloquentTokenStoreTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $migration = require __DIR__.'/../../database/migrations/create_oauth_refresh_tokens_table.php.stub';
+        // A server database (OAUTH_TEST_PGSQL_HOST) outlives the test, unlike SQLite in memory.
+        $migration->down();
         $migration->up();
     }
 
@@ -24,6 +26,14 @@ class EloquentTokenStoreTest extends TestCase
     {
         parent::setUp();
         $this->store = new EloquentTokenStore;
+    }
+
+    public function test_runs_on_the_database_ci_asked_for(): void
+    {
+        // Guards the PostgreSQL job: a misspelled variable would silently fall back to SQLite.
+        $expected = getenv('OAUTH_TEST_EXPECT_DRIVER');
+
+        $this->assertSame(is_string($expected) && $expected !== '' ? $expected : 'sqlite', DB::connection()->getDriverName());
     }
 
     public function test_round_trip_keeps_every_field(): void

@@ -18,7 +18,9 @@ use Dakiquang\OAuthRefreshLock\StoredToken;
 use Dakiquang\OAuthRefreshLock\Stores\ArrayTokenStore;
 use Dakiquang\OAuthRefreshLock\Tests\Support\FixedClassifier;
 use Dakiquang\OAuthRefreshLock\Tests\Support\SpyLockProvider;
+use Illuminate\Database\QueryException;
 use LogicException;
+use PDOException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -220,6 +222,48 @@ class RefreshCoordinatorTest extends TestCase
         $this->assertSame(['oauth-refresh-lock:'.self::KEY], $this->locks->lockNames);
     }
 
+    public function test_deadlock_while_acquiring_the_lock_keeps_waiting(): void
+    {
+        $this->seed(expiresIn: 60);
+        $this->locks->acquireErrors = [$this->queryError('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock')];
+
+        $access = $this->coordinator()->for(self::KEY)->accessToken($this->refresher());
+
+        $this->assertSame('access-1', $access);
+        $this->assertSame(1, $this->refreshCalls);
+        $this->assertSame(2, $this->locks->locksRequested, 'the lost race is retried with a new lock attempt');
+    }
+
+    public function test_deadlock_after_the_callback_started_is_not_retried(): void
+    {
+        $calls = 0;
+
+        try {
+            $this->coordinator()->for(self::KEY)->withLock(function () use (&$calls): never {
+                $calls++;
+
+                throw $this->queryError('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock');
+            });
+            $this->fail('QueryException was not thrown');
+        } catch (QueryException) {
+            $this->assertSame(1, $calls, 'retrying could call the provider twice');
+        }
+    }
+
+    public function test_other_database_errors_while_acquiring_are_not_retried(): void
+    {
+        $this->seed(expiresIn: 60);
+        $this->locks->acquireErrors = [$this->queryError("SQLSTATE[42S02]: Base table or view not found: 1146 Table 'cache_locks' doesn't exist")];
+
+        try {
+            $this->coordinator()->for(self::KEY)->token($this->refresher());
+            $this->fail('QueryException was not thrown');
+        } catch (QueryException) {
+            $this->assertSame(1, $this->locks->locksRequested);
+            $this->assertSame(0, $this->refreshCalls);
+        }
+    }
+
     public function test_provider_messages_never_reach_exception_messages_or_the_store(): void
     {
         $this->seed(expiresIn: 60);
@@ -355,6 +399,11 @@ class RefreshCoordinatorTest extends TestCase
     private function coordinator(RefreshFailure $failure = RefreshFailure::Unexpected, string $code = 'test_code', int $lockSeconds = 30): RefreshCoordinator
     {
         return new RefreshCoordinator($this->store, $this->locks, new FixedClassifier($failure, $code), lockSeconds: $lockSeconds);
+    }
+
+    private function queryError(string $message): QueryException
+    {
+        return new QueryException('shared', 'update cache_locks ...', [], new PDOException($message));
     }
 
     private function seedAgain(int $expiresIn): void

@@ -15,6 +15,7 @@ use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
+use UnexpectedValueException;
 
 class OAuthRefreshLockServiceProvider extends ServiceProvider
 {
@@ -30,9 +31,9 @@ class OAuthRefreshLockServiceProvider extends ServiceProvider
             $config = $app->make('config');
 
             return new RefreshCoordinator(
-                store: $app->make(TokenStore::class),
-                locks: $this->lockProvider($app->make(CacheFactory::class), $config->get('oauth-refresh-lock.lock_store')),
-                classifier: $app->make(ErrorClassifier::class),
+                store: $this->resolve($app, TokenStore::class),
+                locks: $this->lockProvider($this->resolve($app, CacheFactory::class), $config->get('oauth-refresh-lock.lock_store')),
+                classifier: $this->resolve($app, ErrorClassifier::class),
                 lockPrefix: $this->string($config->get('oauth-refresh-lock.lock_prefix'), 'oauth-refresh-lock:'),
                 skewSeconds: $this->int($config->get('oauth-refresh-lock.skew_seconds'), 120),
                 lockSeconds: $this->int($config->get('oauth-refresh-lock.lock_seconds'), 30),
@@ -52,6 +53,24 @@ class OAuthRefreshLockServiceProvider extends ServiceProvider
                 __DIR__.'/../database/migrations/create_oauth_refresh_tokens_table.php.stub' => $this->app->databasePath('migrations/'.date('Y_m_d_His').'_create_oauth_refresh_tokens_table.php'),
             ], 'oauth-refresh-lock-migrations');
         }
+    }
+
+    /**
+     * Laravel 10's container is untyped; check what it returns instead of trusting it.
+     *
+     * @template T of object
+     *
+     * @param  class-string<T>  $abstract
+     * @return T
+     */
+    private function resolve(Application $app, string $abstract): object
+    {
+        $instance = $app->make($abstract);
+        if (! $instance instanceof $abstract) {
+            throw new UnexpectedValueException("The container did not return a {$abstract}.");
+        }
+
+        return $instance;
     }
 
     private function lockProvider(CacheFactory $cache, mixed $storeName): LockProvider

@@ -1,0 +1,22 @@
+{
+    "PKSA-b41t-wbzk-9q51": {
+        "reason": "CVE-2026-114509 TokenGuard authentication bypass (critical). Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
+        "on-audit": false
+    },
+    "PKSA-3r5d-mb8f-1qw9": {
+        "reason": "CRLF injection in the default email rule (high). Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
+        "on-audit": false
+    },
+    "PKSA-mdq4-51ck-6kdq": {
+        "reason": "CVE-2026-48019 CRLF injection in the default email rule. Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
+        "on-audit": false
+    },
+    "PKSA-m5cs-t1y6-qpcs": {
+        "reason": "Temporary signed URL path confusion (medium). Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
+        "on-audit": false
+    },
+    "PKSA-d5tc-s1qs-h781": {
+        "reason": "CVE-2026-102279 XSS in the debug page (low). Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
+        "on-audit": false
+    }
+}

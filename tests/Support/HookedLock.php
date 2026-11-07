@@ -17,6 +17,10 @@ final class HookedLock implements Lock
 
     public function block($seconds, $callback = null)
     {
+        if ($this->spy->acquireErrors !== []) {
+            throw array_shift($this->spy->acquireErrors);
+        }
+
         return $this->inner->block($seconds, $callback === null ? null : $this->hooked($callback));
     }
 
