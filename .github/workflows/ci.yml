@@ -23,7 +23,7 @@ env:
     if [ "$LARAVEL" -lt 12 ]; then
       composer config --json policy.advisories.ignore-id "$(cat .github/legacy-advisories.json)"
     fi
-    composer require "laravel/framework:^$LARAVEL.0" "orchestra/testbench:^$TESTBENCH.0" --dev --no-update --no-interaction
+    composer require "laravel/framework:^$LARAVEL.0" --dev --no-update --no-interaction
     composer update $COMPOSER_FLAGS --prefer-dist --no-interaction --no-progress
     composer audit || true
 
@@ -36,20 +36,21 @@ jobs:
       matrix:
         include:
           # Laravel 10/11: end of life, best-effort support.
-          - { php: '8.1', laravel: '10', testbench: '8' }
-          - { php: '8.1', laravel: '10', testbench: '8', lowest: true }
-          - { php: '8.2', laravel: '10', testbench: '8' }
-          - { php: '8.2', laravel: '11', testbench: '9' }
-          - { php: '8.3', laravel: '10', testbench: '8' }
-          - { php: '8.3', laravel: '11', testbench: '9' }
-          - { php: '8.4', laravel: '11', testbench: '9' }
-          - { php: '8.2', laravel: '12', testbench: '10' }
-          - { php: '8.3', laravel: '12', testbench: '10' }
-          - { php: '8.3', laravel: '13', testbench: '11' }
-          - { php: '8.4', laravel: '12', testbench: '10' }
-          - { php: '8.4', laravel: '13', testbench: '11' }
-          - { php: '8.5', laravel: '12', testbench: '10' }
-          - { php: '8.5', laravel: '13', testbench: '11' }
+          - { php: '8.1', laravel: '10' }
+          - { php: '8.1', laravel: '10', lowest: true }
+          - { php: '8.2', laravel: '10' }
+          - { php: '8.2', laravel: '11' }
+          - { php: '8.2', laravel: '11', lowest: true }
+          - { php: '8.3', laravel: '10' }
+          - { php: '8.3', laravel: '11' }
+          - { php: '8.4', laravel: '11' }
+          - { php: '8.2', laravel: '12' }
+          - { php: '8.3', laravel: '12' }
+          - { php: '8.3', laravel: '13' }
+          - { php: '8.4', laravel: '12' }
+          - { php: '8.4', laravel: '13' }
+          - { php: '8.5', laravel: '12' }
+          - { php: '8.5', laravel: '13' }
     steps:
       - uses: actions/checkout@v4
 
@@ -62,7 +63,6 @@ jobs:
       - name: Install dependencies
         env:
           LARAVEL: ${{ matrix.laravel }}
-          TESTBENCH: ${{ matrix.testbench }}
           COMPOSER_FLAGS: ${{ matrix.lowest && '--prefer-lowest' || '' }}
         run: bash -ec "$INSTALL"
 
@@ -76,8 +76,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { php: '8.1', laravel: '10', testbench: '8' }
-          - { php: '8.4', laravel: '13', testbench: '11', pint: true }
+          - { php: '8.1', laravel: '10' }
+          - { php: '8.4', laravel: '13', pint: true }
     steps:
       - uses: actions/checkout@v4
 
@@ -89,7 +89,6 @@ jobs:
       - name: Install dependencies
         env:
           LARAVEL: ${{ matrix.laravel }}
-          TESTBENCH: ${{ matrix.testbench }}
         run: bash -ec "$INSTALL"
 
       - name: PHPStan
@@ -106,8 +105,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { php: '8.3', laravel: '10', testbench: '8' }
-          - { php: '8.4', laravel: '13', testbench: '11' }
+          - { php: '8.3', laravel: '10' }
+          - { php: '8.4', laravel: '13' }
     services:
       redis:
         image: redis:7-alpine
@@ -132,7 +131,6 @@ jobs:
       - name: Install dependencies
         env:
           LARAVEL: ${{ matrix.laravel }}
-          TESTBENCH: ${{ matrix.testbench }}
         run: bash -ec "$INSTALL"
 
       - name: Concurrency suite on MySQL with database and Redis locks
@@ -153,8 +151,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { php: '8.3', laravel: '10', testbench: '8' }
-          - { php: '8.4', laravel: '13', testbench: '11' }
+          - { php: '8.3', laravel: '10' }
+          - { php: '8.4', laravel: '13' }
     services:
       postgres:
         image: postgres:16-alpine
@@ -175,7 +173,6 @@ jobs:
       - name: Install dependencies
         env:
           LARAVEL: ${{ matrix.laravel }}
-          TESTBENCH: ${{ matrix.testbench }}
         run: bash -ec "$INSTALL"
 
       - name: Store tests on PostgreSQL (upsert, version increment, compare-and-swap)
@@ -184,4 +181,5 @@ jobs:
           OAUTH_TEST_PGSQL_USER: postgres
           OAUTH_TEST_PGSQL_PASSWORD: ci-only
           OAUTH_TEST_PGSQL_DATABASE: testing
+          OAUTH_TEST_EXPECT_DRIVER: pgsql
         run: vendor/bin/phpunit --testsuite Feature

@@ -20,7 +20,8 @@ This package makes refresh safe under concurrency:
 | Laravel | PHP | Support |
 |---|---|---|
 | 12, 13 | 8.2–8.5 | Full |
-| 10, 11 | 8.1–8.4 | Best-effort, see below |
+| 11 (11.44.1 or later) | 8.2–8.4 | Best-effort, see below |
+| 10 (10.48.29 or later) | 8.1–8.3 | Best-effort, see below |
 
 Tested on SQLite, MySQL and PostgreSQL.
 

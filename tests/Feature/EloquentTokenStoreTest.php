@@ -28,6 +28,14 @@ class EloquentTokenStoreTest extends TestCase
         $this->store = new EloquentTokenStore;
     }
 
+    public function test_runs_on_the_database_ci_asked_for(): void
+    {
+        // Guards the PostgreSQL job: a misspelled variable would silently fall back to SQLite.
+        $expected = getenv('OAUTH_TEST_EXPECT_DRIVER');
+
+        $this->assertSame(is_string($expected) && $expected !== '' ? $expected : 'sqlite', DB::connection()->getDriverName());
+    }
+
     public function test_round_trip_keeps_every_field(): void
     {
         $expires = CarbonImmutable::parse('2026-11-07 10:30:00');

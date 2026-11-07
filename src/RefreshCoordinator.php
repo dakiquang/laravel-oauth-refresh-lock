@@ -16,6 +16,8 @@ use Dakiquang\OAuthRefreshLock\Exceptions\TransientRefreshFailure;
 use Dakiquang\OAuthRefreshLock\Refreshers\CallbackRefresher;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Database\DetectsConcurrencyErrors;
+use Illuminate\Database\QueryException;
 use Throwable;
 
 /**
@@ -34,6 +36,8 @@ use Throwable;
  */
 class RefreshCoordinator
 {
+    use DetectsConcurrencyErrors;
+
     public function __construct(
         private readonly TokenStore $store,
         private readonly LockProvider $locks,
@@ -71,14 +75,7 @@ class RefreshCoordinator
 
         $refresher = $refresher instanceof Closure ? new CallbackRefresher($refresher) : $refresher;
 
-        try {
-            /** @var StoredToken */
-            return $this->locks
-                ->lock($this->lockName($key), $this->lockSeconds)
-                ->block($waitSeconds, fn (): StoredToken => $this->refreshWhileLocked($key, $refresher, $skewSeconds));
-        } catch (LockTimeoutException $timeout) {
-            throw new RefreshLockTimeout($key, $waitSeconds, $timeout);
-        }
+        return $this->underLock($key, $waitSeconds, fn (): StoredToken => $this->refreshWhileLocked($key, $refresher, $skewSeconds));
     }
 
     /**
@@ -94,12 +91,46 @@ class RefreshCoordinator
      */
     public function withLock(string $key, Closure $callback, int $waitSeconds): mixed
     {
-        try {
-            return $this->locks
-                ->lock($this->lockName($key), $this->lockSeconds)
-                ->block($waitSeconds, fn () => $callback($this->store));
-        } catch (LockTimeoutException $timeout) {
-            throw new RefreshLockTimeout($key, $waitSeconds, $timeout);
+        return $this->underLock($key, $waitSeconds, fn () => $callback($this->store));
+    }
+
+    /**
+     * Laravel 10–12's database lock can deadlock on MySQL while workers compete
+     * for the lock row. Such an error while acquiring only means this worker lost
+     * the race, so keep waiting. Once the callback has started, any error is
+     * rethrown: retrying could call the provider a second time.
+     *
+     * @template TReturn
+     *
+     * @param  Closure(): TReturn  $callback
+     * @return TReturn
+     *
+     * @throws RefreshLockTimeout
+     */
+    private function underLock(string $key, int $waitSeconds, Closure $callback): mixed
+    {
+        $deadline = microtime(true) + $waitSeconds;
+        $started = false;
+        $run = function () use ($callback, &$started): mixed {
+            $started = true;
+
+            return $callback();
+        };
+
+        while (true) {
+            try {
+                /** @var TReturn */
+                return $this->locks
+                    ->lock($this->lockName($key), $this->lockSeconds)
+                    ->block(max(0, (int) ceil($deadline - microtime(true))), $run);
+            } catch (LockTimeoutException $timeout) {
+                throw new RefreshLockTimeout($key, $waitSeconds, $timeout);
+            } catch (QueryException $error) {
+                if ($started || ! $this->causedByConcurrencyError($error) || microtime(true) >= $deadline) {
+                    throw $error;
+                }
+                usleep(250_000);
+            }
         }
     }
 
