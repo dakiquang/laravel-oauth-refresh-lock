@@ -15,3 +15,7 @@ Laravel versions that no longer receive security fixes, today 10 and 11. They al
 ## Not supported
 
 Laravel 9 and older, PHP 8.0 and older.
+
+## Installing on Laravel 10 and 11
+
+Composer 2.9 and later refuse to install package versions with security advisories by default. What we observed with Composer 2.10.1, in a Laravel 10.50.4 app and a Laravel 11.57.1 app whose `composer.lock` already existed and with that blocking on: `composer require` for this package installed it (with a warning listing the framework's advisories), while `composer update laravel/framework` was refused. Your result can differ with another Composer version or without a lock file. This package does not change or ship any advisory configuration.
