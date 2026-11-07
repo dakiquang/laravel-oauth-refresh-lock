@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Dakiquang\OAuthRefreshLock\Classifiers\DefaultErrorClassifier;
 use Dakiquang\OAuthRefreshLock\Contracts\ErrorClassifier;
 use Dakiquang\OAuthRefreshLock\Contracts\TokenStore;
+use Dakiquang\OAuthRefreshLock\Events\TokenRefreshed;
 use Dakiquang\OAuthRefreshLock\Exceptions\LockStoreNotSupported;
 use Dakiquang\OAuthRefreshLock\Facades\OAuthRefreshLock;
 use Dakiquang\OAuthRefreshLock\PendingRefresh;
@@ -18,6 +19,7 @@ use Dakiquang\OAuthRefreshLock\Stores\ArrayTokenStore;
 use Dakiquang\OAuthRefreshLock\Stores\EloquentTokenStore;
 use Dakiquang\OAuthRefreshLock\Tests\TestCase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 
 class ServiceProviderTest extends TestCase
 {
@@ -94,5 +96,17 @@ class ServiceProviderTest extends TestCase
 
         $this->assertSame('new', $access);
         $this->assertTrue($lockWasHeld);
+    }
+
+    public function test_events_go_to_the_application_dispatcher(): void
+    {
+        Event::fake([TokenRefreshed::class]);
+        $this->app->forgetInstance(RefreshCoordinator::class);
+        $this->app->instance(TokenStore::class, $store = new ArrayTokenStore);
+        $store->put('k', new StoredToken('old', 'r', CarbonImmutable::now()->subMinute()));
+
+        OAuthRefreshLock::for('k')->accessToken(fn (): RefreshedToken => RefreshedToken::fromExpiresIn('new', 'r2', 3600));
+
+        Event::assertDispatched(TokenRefreshed::class, fn (TokenRefreshed $event): bool => $event->key === 'k');
     }
 }
