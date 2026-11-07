@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/dakiquang/laravel-oauth-refresh-lock/actions/workflows/ci.yml/badge.svg)](https://github.com/dakiquang/laravel-oauth-refresh-lock/actions/workflows/ci.yml)
 
-> **Work in progress.** Not released yet. The API below may change before v0.1.0.
+> **Early release (0.x).** The API may still change before 1.0; changes are listed in the [changelog](CHANGELOG.md).
 
 Prevents the OAuth2 refresh token race condition in Laravel: when several queue workers refresh the same token at once, providers that retire the old refresh token at once answer the losers with `invalid_grant`, and some revoke the connection. One refresh per expiry; the other workers wait and use the token it stored.
 
