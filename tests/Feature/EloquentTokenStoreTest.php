@@ -17,6 +17,8 @@ class EloquentTokenStoreTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $migration = require __DIR__.'/../../database/migrations/create_oauth_refresh_tokens_table.php.stub';
+        // A server database (OAUTH_TEST_PGSQL_HOST) outlives the test, unlike SQLite in memory.
+        $migration->down();
         $migration->up();
     }
 

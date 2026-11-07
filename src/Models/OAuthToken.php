@@ -41,19 +41,19 @@ class OAuthToken extends Model
     }
 
     /**
-     * @return array<string, string>
+     * A property, not the casts() method: Laravel 10 only reads the property,
+     * and without these casts the tokens would be stored unencrypted.
+     *
+     * @var array<string, string>
      */
-    protected function casts(): array
-    {
-        return [
-            'access_token' => 'encrypted',
-            'refresh_token' => 'encrypted',
-            'expires_at' => 'immutable_datetime',
-            'scopes' => 'array',
-            'meta' => 'array',
-            'version' => 'integer',
-            'revoked_at' => 'immutable_datetime',
-            'revoked_from_version' => 'integer',
-        ];
-    }
+    protected $casts = [
+        'access_token' => 'encrypted',
+        'refresh_token' => 'encrypted',
+        'expires_at' => 'immutable_datetime',
+        'scopes' => 'array',
+        'meta' => 'array',
+        'version' => 'integer',
+        'revoked_at' => 'immutable_datetime',
+        'revoked_from_version' => 'integer',
+    ];
 }

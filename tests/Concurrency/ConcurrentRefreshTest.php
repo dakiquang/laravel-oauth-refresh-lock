@@ -47,6 +47,11 @@ class ConcurrentRefreshTest extends TestCase
 
         parent::setUp();
 
+        // WAL is a property of the database file: switch it once, before the
+        // workers exist, so they never race to change the journal mode.
+        $this->sqlite('PRAGMA journal_mode = WAL');
+        $this->sqliteBusyTimeout();
+
         Schema::connection('shared')->dropIfExists('oauth_refresh_tokens');
         Schema::connection('shared')->dropIfExists('cache_locks');
         $migration = require __DIR__.'/../../database/migrations/create_oauth_refresh_tokens_table.php.stub';
@@ -89,6 +94,7 @@ class ConcurrentRefreshTest extends TestCase
             'driver' => 'sqlite',
             'database' => $this->dir.'/shared.sqlite',
             'prefix' => '',
+            // Laravel 12+ applies these on connect; Laravel 10 and 11 ignore them, see sqliteBusyTimeout().
             'busy_timeout' => 10000,
             'journal_mode' => 'wal',
         ]);
@@ -177,6 +183,7 @@ class ConcurrentRefreshTest extends TestCase
         }
 
         DB::purge('shared');
+        $this->sqliteBusyTimeout();
 
         return [
             'refreshes' => $this->lines($refreshLog),
@@ -212,6 +219,7 @@ class ConcurrentRefreshTest extends TestCase
         try {
             // Never share the parent's sockets or file handles.
             DB::purge('shared');
+            $this->sqliteBusyTimeout();
             if ($lockStore === 'redis') {
                 app('redis')->purge('default');
             }
@@ -252,6 +260,22 @@ class ConcurrentRefreshTest extends TestCase
     private function lines(string $file): array
     {
         return file_exists($file) ? array_values(array_filter(array_map('trim', file($file) ?: []))) : [];
+    }
+
+    /**
+     * The busy timeout belongs to the connection, so every new connection sets it.
+     */
+    private function sqliteBusyTimeout(): void
+    {
+        $this->sqlite('PRAGMA busy_timeout = 10000');
+    }
+
+    private function sqlite(string $pragma): void
+    {
+        $connection = DB::connection('shared');
+        if ($connection->getDriverName() === 'sqlite') {
+            $connection->getPdo()->exec($pragma);
+        }
     }
 
     private function redisAvailable(): bool

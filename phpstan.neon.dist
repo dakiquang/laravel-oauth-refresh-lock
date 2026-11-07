@@ -1,5 +1,9 @@
 parameters:
     level: max
+    # Analyse against the oldest and newest PHP the package supports.
+    phpVersion:
+        min: 80100
+        max: 80599
     paths:
         - src
     tmpDir: build/phpstan
