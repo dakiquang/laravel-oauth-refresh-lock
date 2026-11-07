@@ -1,0 +1,69 @@
+{
+    "name": "dakiquang/laravel-oauth-refresh-lock",
+    "description": "Refresh rotating OAuth2 tokens in Laravel without racing: one refresh per expiry, every worker gets the new token.",
+    "keywords": [
+        "laravel",
+        "oauth2",
+        "refresh-token",
+        "token-rotation",
+        "race-condition",
+        "cache-lock",
+        "xero",
+        "quickbooks"
+    ],
+    "homepage": "https://github.com/dakiquang/laravel-oauth-refresh-lock",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Quang Dang",
+            "homepage": "https://quangdk.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/cache": "^10.0 || ^11.0 || ^12.0 || ^13.0",
+        "illuminate/contracts": "^10.0 || ^11.0 || ^12.0 || ^13.0",
+        "illuminate/database": "^10.0 || ^11.0 || ^12.0 || ^13.0",
+        "illuminate/events": "^10.0 || ^11.0 || ^12.0 || ^13.0",
+        "illuminate/support": "^10.0 || ^11.0 || ^12.0 || ^13.0",
+        "nesbot/carbon": "^2.67 || ^3.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.13",
+        "league/oauth2-client": "^2.7",
+        "orchestra/testbench": "^8.0 || ^9.0 || ^10.0 || ^11.0",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^10.5 || ^11.5 || ^12.0"
+    },
+    "suggest": {
+        "league/oauth2-client": "Use LeagueRefresher to refresh tokens for any league/oauth2-client provider."
+    },
+    "autoload": {
+        "psr-4": {
+            "Dakiquang\\OAuthRefreshLock\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Dakiquang\\OAuthRefreshLock\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Dakiquang\\OAuthRefreshLock\\OAuthRefreshLockServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "format": "pint",
+        "format:check": "pint --test"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
