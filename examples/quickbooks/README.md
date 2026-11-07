@@ -4,7 +4,7 @@ A connect / call / disconnect flow for QuickBooks Online, plus a command that sh
 
 QuickBooks is a good test case: when two refreshes use the same refresh token, the second gets `invalid_grant` and Intuit may revoke the refresh tokens, so the user has to authorise again ([Intuit's FAQ](https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization/faq)). More in [docs/providers.md](../../docs/providers.md).
 
-> **Tested against a local stand-in for Intuit's token endpoint and CompanyInfo API, not yet against a real QuickBooks sandbox company.** The endpoints, scope, `realmId` parameter and API path come from Intuit's documentation (links below). If something differs with a real sandbox, please open an issue.
+> **Verified on 07/11/2026 against a QuickBooks Online sandbox company** (Laravel 12, PHP 8.4, `database` cache locks): connect, CompanyInfo, and `quickbooks:race --workers=6` three times, each with one refresh and no `invalid_grant`. Error paths (wrong `state`, another company's `realmId`, Intuit unavailable, rejected refresh token) were tested against a local stand-in for Intuit. If something differs for you, please open an issue.
 
 ## What you need
 
