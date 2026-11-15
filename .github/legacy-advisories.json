@@ -18,5 +18,9 @@
     "PKSA-d5tc-s1qs-h781": {
         "reason": "CVE-2026-102279 XSS in the debug page (low). Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
         "on-audit": false
+    },
+    "PKSA-yxbx-3c9s-cjt9": {
+        "reason": "CVE-2026-128083 task output injection in Concurrency::run() process driver (low). Laravel 10/11 are end of life and have no fix; ignored only to install them in the legacy CI jobs. This package does not use the affected feature.",
+        "on-audit": false
     }
 }
