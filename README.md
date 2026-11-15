@@ -12,6 +12,16 @@ Prevents the OAuth2 refresh token race condition in Laravel: when several queue 
 
 Works with any [league/oauth2-client](https://oauth2-client.thephpleague.com/) provider or any SDK, on Laravel 10, 11, 12 and 13, with queue workers, Laravel Horizon, scheduled commands and web requests. Examples for [QuickBooks Online](examples/quickbooks), [Xero](examples/xero), [Salesforce](examples/salesforce), [Microsoft Graph](examples/microsoft) and [Google](examples/google).
 
+### ☕ Found it useful? Buy me a coffee
+
+If this project saves you time, a coffee keeps it maintained. Any amount helps. More
+options on the [donate page](https://dakiquang.github.io/donate/).
+
+| MoMo · VietQR | PayPal |
+|:---:|:---:|
+| <img src="https://dakiquang.github.io/donate/images/qr-momo.png" width="180" alt="MoMo and VietQR code"> | <img src="https://dakiquang.github.io/donate/images/qr-paypal.png" width="180" alt="PayPal QR code"> |
+| [![Mở MoMo](https://img.shields.io/badge/M%E1%BB%9F%20MoMo-%E2%86%92-A50064?style=for-the-badge)](https://me.momo.vn/dakiquang) | [![Open PayPal](https://img.shields.io/badge/Open%20PayPal-%E2%86%92-0070BA?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/dakiquang) |
+
 ## The problem: `invalid_grant` when two workers refresh at once
 
 Providers that rotate refresh tokens issue a new refresh token on every refresh and retire the old one. Two workers notice the same expired access token and both send the same refresh token. The first wins. The second sends a refresh token that was just retired and gets:
