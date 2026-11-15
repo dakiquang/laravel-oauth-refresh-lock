@@ -20,7 +20,7 @@ options on the [donate page](https://dakiquang.github.io/donate/).
 | MoMo · VietQR | PayPal |
 |:---:|:---:|
 | <img src="https://dakiquang.github.io/donate/images/qr-momo.png" width="180" alt="MoMo and VietQR code"> | <img src="https://dakiquang.github.io/donate/images/qr-paypal.png" width="180" alt="PayPal QR code"> |
-| [![Mở MoMo](https://img.shields.io/badge/M%E1%BB%9F%20MoMo-%E2%86%92-A50064?style=for-the-badge)](https://me.momo.vn/dakiquang) | [![Open PayPal](https://img.shields.io/badge/Open%20PayPal-%E2%86%92-0070BA?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/dakiquang) |
+| [![Open MoMo](https://img.shields.io/badge/Open%20MoMo-%E2%86%92-A50064?style=for-the-badge)](https://me.momo.vn/dakiquang) | [![Open PayPal](https://img.shields.io/badge/Open%20PayPal-%E2%86%92-0070BA?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/dakiquang) |
 
 ## The problem: `invalid_grant` when two workers refresh at once
 
